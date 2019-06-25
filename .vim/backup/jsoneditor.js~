@@ -1,4 +1,0 @@
-//require('../../../node_modules/jsoneditor/dist/jsoneditor.css');
-require('./jsoneditor.css'); // local import to rebase urls in css
-//require('../../../node_modules/jsoneditor/dist/img/jsoneditor-icons.svg');
-module.exports = require('../../../node_modules/jsoneditor/dist/jsoneditor.js');
