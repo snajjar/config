@@ -8,14 +8,12 @@ Xft.rgba: rgba
 
 XTerm*locale: true
 XTerm*reverseVideo: on
-! xterm*font: terminus-12
-
-xterm*faceName: Liberation Mono:size=12:antialias=true
-xterm*font: 7x13
+xterm*font: terminus-18
+xterm*faceName: xft:monospace:pixelsize=17
 
 
 Xcursor.theme: Vanilla-DMZ-AA
-Xcursor.size: 32
+Xcursor.size: 64
 
 
 ! Set up scrollbars - get them, get them on the right side, and be

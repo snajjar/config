@@ -1,6 +1,0 @@
-section.contact-us {
-    color: white;
-    text-align: center;
-    background-color: #949AA0;
-    padding: 20px;
-}

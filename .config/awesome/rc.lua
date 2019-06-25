@@ -340,6 +340,8 @@ globalkeys = awful.util.table.join(
               {description = "open firefox", group = "launcher"}),
     awful.key({ modkey, "Control" }, "r", awesome.restart,
               {description = "reload awesome", group = "awesome"}),
+    awful.key({ modkey,           }, "m", function () awful.spawn("mousepad") end,
+              {description = "open mousepad", group = "launcher"}),
     awful.key({ modkey,           }, "p", function () awful.spawn("pavucontrol") end,
               {description = "open pavucontrol", group = "launcher"}),
     awful.key({ modkey, "Shift"   }, "q", awesome.quit,

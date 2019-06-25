@@ -1,6 +1,0 @@
-{
-    "componentName" : "@dualbox/test",
-    "componentVersion" : "1.0.65",
-    "debug" : true,
-    "script" : "var test = 'ok'"
-}

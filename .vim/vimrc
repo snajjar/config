@@ -137,7 +137,7 @@ map <F6> :bprevious<CR>
 map <F7> :bnext<CR>
 
 " open VTreeExplorer in a tab
-" map <F8> :40vs<bar>:VTreeExplore<CR><C-w><C-w>
+map <F8> :40vs<bar>:VTreeExplore<CR><C-w><C-w>
 
 " retab and remove trailing spaces
 map <F9> :retab!<bar>%s/\s\+$<CR>
