@@ -1,0 +1,313 @@
+Meteor.startup(function () {
+    moment.locale("fr");
+
+    // workaround for https://github.com/meteor/meteor/issues/6793
+    window.HTML.isConstructedObject = function(x) { return _.isObject(x) && !$.isPlainObject(x); };
+
+    // recaptcha config with scientifeet public key (private one on server side)
+    reCAPTCHA.config({
+        publickey: Meteor.settings.public.recaptchaPublicKey,
+        hl: 'fr'
+    });
+
+    //load fonts
+    WebFontConfig = {
+        google: { families: [ 'Alegreya Sans SC:100,400', 'Alegreya Sans:400,500', 'Quicksand' ] }
+    };
+
+    (function() {
+        var wf = document.createElement('script');
+        wf.src = ('https:' == document.location.protocol ? 'https' : 'http') +
+            '://ajax.googleapis.com/ajax/libs/webfont/1/webfont.js';
+        wf.type = 'text/javascript';
+        wf.async = 'true';
+        var s = document.getElementsByTagName('script')[0];
+        s.parentNode.insertBefore(wf, s);
+        console.log("async fonts loaded", WebFontConfig);
+
+    })();
+
+    $(window).load(function(){
+        //init mobile navigation
+        $('#nav-icon1,#nav-icon2,#nav-icon3,#nav-icon4').click(function() {
+            $(this).toggleClass('open');
+        });
+
+        $('#nav-icon1').on('click', function() {
+            $('.header-button').toggleClass('show-menu');
+            $('.header-login').toggleClass('show-menu');
+            $(' nav').toggleClass('show-menu');
+        });
+
+        $(window).resize(function(){
+            articleHover();
+        })
+    });
+});
+
+Meteor.Spinner = {
+  options: {
+    lines: 13,  // The number of lines to draw
+    length: 10,  // The length of each line
+    width: 2,  // The line thickness
+    radius: 3,  // The radius of the inner circle
+    corners: 1,  // Corner roundness (0..1)
+    rotate: 0,  // The rotation offset
+    direction: 1,  // 1: clockwise, -1: counterclockwise
+    color: '#000',  // #rgb or #rrggbb
+    speed: 1.2,  // Rounds per second
+    trail: 60,  // Afterglow percentage
+    shadow: false,  // Whether to render a shadow
+    hwaccel: false,  // Whether to use hardware acceleration
+    className: 'spinner', // The CSS class to assign to the spinner
+    zIndex: 2e9,  // The z-index (defaults to 2000000000)
+    top: '50%',  // Top position relative to parent in px
+    left: '50%'  // Left position relative to parent in px
+  }
+};
+
+/**
+ *   Set defined data (title, image, description, keywords)
+ */
+var defaultPageData = {
+    "title": "La semelle orthopédique imprimée en 3D - ScientiFeet",
+    "ogimage" : { name: "og:image", content: Meteor.absoluteUrl("img/logo/LogoScientiFeet.png") },
+    "keywords": { name: "keywords", content: "semelle, scientifeet, 3D, impression 3D, podologue, podologie, patient" },
+    "description": { name: "description", content: "Créez des semelles orthopédiques adaptées à vos patients à partir de scan 3D de leurs pieds." },
+}
+
+setPageData = function( data ) {
+    DocHead.removeDocHeadAddedTags();
+    if( !data ) data = {};
+
+    // add title
+    DocHead.setTitle(data.title ? data.title : defaultPageData.title);
+    document.title = data.title ? data.title : defaultPageData.title;
+
+    // add page image
+    DocHead.addMeta( data.image ? { name: "og:image", content: data.image } : defaultPageData.ogimage);
+
+    // add page description
+    DocHead.addMeta( data.description ? { name : "description", content: data.description } : defaultPageData.description );
+    DocHead.addMeta( data.description ? { name : "og:description", content: data.description } : defaultPageData.description );
+
+    // add page keywords
+    DocHead.addMeta( data.keywords ? { name : "keywords", content: data.keywords } : defaultPageData.keywords );
+}
+
+/**
+ *   General functions to use
+ */
+
+articleHover = function(){
+    $('.texted-content').each(function() {
+        var descH = $(this).children('.description-thumb').innerHeight();
+        var rmH = $(this).children('.read-more').innerHeight();
+
+        $(this).css('bottom', -descH - rmH + 'px');
+    });
+}
+
+getDate = function(datestr) {
+    if( datestr === undefined || datestr === "Invalid date" ) return undefined;
+
+    // swap year, month and day to go back to iso format
+    var d = datestr.split('/');
+    d.reverse();
+    return new Date(d.join('-'));
+}
+
+// check if popover() has been run on the element, run it if not,
+// and trigger click on it
+smartPopOver = function(el) {
+    if( !$(el).data('initialized') ) {
+        $(el).popover({
+            'container' : 'body',
+            'trigger'   : 'focus',
+        });
+        $(el).trigger('focus');
+    }
+}
+
+
+/**
+ *    Register global helpers (available from all templates)
+ */
+var isEmpty = function(stuff) {
+    return stuff === "" || stuff === undefined || stuff === null || (typeof stuff == "number" && isNaN(stuff));
+}
+
+
+
+Template.registerHelper("isEmptyField", function(field) {
+    return isEmpty(field);
+});
+
+Template.registerHelper("areEmptyFields", function() {
+    var r = true;
+    // one argument is spacebars (???)
+    for(var i=0; i<arguments.length-1; i++) {
+        r &= isEmpty(arguments[i]);
+    }
+    return r;
+});
+
+Template.registerHelper("dateFormat", function(date, format) {
+    if( date === undefined ) {
+        return "";
+    }
+
+    // don't use getMoment() in template helpers, since this function adjust the date
+    // with server time. Since we're showing mostly dates from database, thoses have
+    // already been adjusted
+    if(format === "calendar" ) {
+        return moment(date).tz(timezone).calendar();
+    }
+    else {
+        return moment(date).tz(timezone).format(format);
+    }
+});
+
+Template.registerHelper("today", function(format) {
+    if( format === undefined ) {
+        return getMoment().format('L');
+    }
+    else if( format === "calendar" ) {
+        return getMoment().calendar();
+    }
+    else {
+        return getMoment().format(format);
+    }
+});
+
+Template.registerHelper("getSide", function(side) {
+    if( side == "left" ) {
+        return "gauche";
+    }
+    else if( side == "right" ) {
+        return "droit";
+    }
+    else {
+        console.error('cant recognize side: ' + side);
+    }
+});
+
+Template.registerHelper("invertSide", function(side) {
+    if( side == "left" ) return "right";
+    if( side == "right" ) return "left";
+    console.error("Can't get the other side of " + side);
+    return "";
+});
+
+// dynamically add a parameter to the current data context.
+// usefull for passing parameters to template inclusions
+Template.registerHelper('extendContext', function(key, value) {
+  var result = _.clone(this);
+  result[key] = value;
+  return result;
+});
+
+Template.registerHelper('isAdmin', isAdmin);
+
+Template.registerHelper("context", function() {
+    return this;
+});
+
+Template.registerHelper("userSessionExists", function( item ) {
+    return UserSession.get(item) !== undefined;
+});
+
+// get the number of item of a collection
+Template.registerHelper("getCount", function( name ) {
+    // collection "[name]" counter must be published and subscribe under "[name]Count"
+    return Counter.get(name);
+});
+
+Template.registerHelper("subscriptionsReady", function() {
+    return subMgr.ready();
+});
+
+// return true if all the template subscriptions (this.subs) are ready
+Template.registerHelper("ready", function() {
+    return subMgr.ready();
+});
+
+Template.registerHelper("userAccessLevel", function() {
+    var user = Meteor.user();
+    return user ? user.access : 1;
+});
+
+Template.registerHelper("userPerformance", function() {
+    var user = Meteor.user();
+    return user ? user.performance : 0;
+});
+
+Template.registerHelper("absoluteUrl", function(relativeUrl) {
+    return Meteor.absoluteUrl(relativeUrl);
+});
+
+Template.registerHelper("bool2french", function(b) {
+    return b ? "OUI" : "NON";
+});
+
+Template.registerHelper("insoleCredits", function(b) {
+    var user = Meteor.user();
+    return user.getInsoleCredits();
+});
+
+Template.registerHelper("shippingCredits", function(b) {
+    var user = Meteor.user();
+    return user.credits.shippings;
+});
+
+// Augment UserSession with some methods
+UserSession.exists = function(key) {
+    var v = this.get(key);
+    return v !== null && v !== undefined;
+}
+
+Array.prototype.max = function() {
+      return Math.max.apply(null, this);
+};
+
+Array.prototype.min = function() {
+      return Math.min.apply(null, this);
+};
+
+
+/**
+ * Get the parent template instance
+ * @param {Number} [levels] How many levels to go up. Default is 1
+ * @returns {Blaze.TemplateInstance}
+ */
+
+Blaze.TemplateInstance.prototype.parent = function (levels) {
+    var view = this.view;
+    if (typeof levels === "undefined") {
+        levels = 1;
+    }
+    while (view) {
+        if (view.name.substring(0, 9) === "Template." && !(levels--)) {
+            return view.templateInstance();
+        }
+        view = view.parentView;
+    }
+};
+
+/**
+ * Get the parent template instance of the specified name
+ * @returns {Blaze.TemplateInstance}
+ */
+
+Blaze.TemplateInstance.prototype.findParent = function(str) {
+    var ti = this;
+    do {
+        ti = ti.parent();
+        if( ti === undefined ) {
+            throw "didn't find template " + str + " in our parents";
+        }
+    } while( ti.view.name !== ("Template." + str) )
+    return ti;
+};
+
+

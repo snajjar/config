@@ -1,0 +1,60 @@
+import swal from 'sweetalert2';
+
+Template.SettingsPage.onCreated(function() {
+    this.template = new ReactiveVar('SettingsProfile');
+});
+
+Template.SettingsPage.onRendered(function() {
+    // load the tab that is set right now
+    if( window.location.hash ) {
+        setSelectedNav();
+    }
+});
+
+Template.SettingsPage.helpers({
+    getActiveTemplate : function() {
+        return Template.instance().template.get();
+    }
+});
+
+Template.SettingsPage.events({
+    "click .link-to-dashboard" : function(e, t) {
+        Router.go('DasbhoardPage');
+    },
+
+    "click a.nav-link" : function(e, t) {
+        e.preventDefault();
+
+        // set the tab to active
+        $(t.findAll('.nav-link')).removeClass('active');
+        $(e.target).addClass('active');
+
+        // show the right template
+        var target = $(e.target).attr("href") // activated tab
+        var tab = target.substr(1);
+        t.template.set(tab);
+
+        // set the hash in url
+        window.location.hash = target;
+    },
+});
+
+AutoForm.addHooks(
+    [
+        'user-settings-profile-form',
+        'user-settings-notifications-form',
+        'user-settings-billing-address-form',
+        'user-settings-billing-vat-form',
+        'user-settings-plan-form'
+    ],
+    {
+        onSuccess : function(formType, result) {
+            console.log("success!");
+            swal('Settings saved', '', 'success');
+            return false;
+        },
+        onError : function(formType, err) {
+            console.log(err);
+        }
+    }
+);

@@ -1,0 +1,525 @@
+<!-- Root App page with all the apps -->
+<template name="AppsPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">
+            <button class="btn btn-lg btn-transparent link-to-dashboard" style="font-size: 24px;">
+                <i class="fa fa-arrow-circle-left"></i>
+            </button>
+            <span>All Apps</span>
+        </h1>
+
+        <div class="card card-appgroup">
+            <div class="card-header">
+                Default group
+            </div>
+            <div class="card-body">
+                <div class="col-xs-2">
+                    {{#each getApps}}
+                        {{> AppCard}}
+                    {{/each}}
+
+                    <div class="card card-new-app col-lg-2 m-3 d-inline-block" style="text-align: center; position: relative; vertical-align: top;">
+                        <div style="position: absolute; top: 0; left: 0; right; 0; margin: 20px auto; width: 100%;">
+                            <p style="margin: 0;">Add</p>
+                        </div>
+                        <div style="position: absolute; top: 0; bottom: 0; left: 0; right: 0; margin: auto; height: 60px;">
+                            <i class="fa fa-plus-circle text-blue" style="font-size: 60px; color: blue; display: block;"></i>
+                        </div>
+                        <div style="position: absolute; bottom: 0; left: 0; right; 0; margin: 20px auto; width: 100%;">
+                            <p style="margin: 0;">new app</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template to display an app card, with the phases and status -->
+<template name="AppCard">
+    <div class="card card-app col-lg-2 m-3 d-inline-block">
+            <div class="card-header">
+                {{this.getName}}
+            </div>
+        <div class="card-body" style="text-align: center;">
+            <img src="{{rooturl}}/img/ressources/DeployedApps_Big_Icon_success.png" class="all-apps-icons" style="vertical-align: middle;">
+        </div>
+        <div class="card-footer">
+            <table>
+                <tr>
+                    <td class="phase">production</td>
+                    <td class="version">{{{showPhase "production"}}}</td>
+                </tr>
+                <tr>
+                    <td class="phase">beta</td>
+                    <td class="version">{{{showPhase "beta"}}}</td>
+                </tr>
+                <tr>
+                    <td class="phase">alpha</td>
+                    <td class="version">{{{showPhase "alpha"}}}</td>
+                </tr>
+                <tr>
+                    <td class="phase">dev</td>
+                    <td class="version">{{{showPhase "dev"}}}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</template>
+
+<!-- Root page of an app -->
+<template name="ApplicationPage">
+    <div class="page page-full-height bg-white">
+        {{#if ready}}
+            {{#if emptyApp}}
+                {{> Template404 message="This application doesn't exist, was deleted, or you don't have access to it."}}
+            {{else}}
+                {{#with getApp}}
+                <h1 class="page-header">
+                    <button class="btn btn-lg btn-transparent btn-back link-to-apps" style="font-size: 24px;">
+                        <i class="fa fa-arrow-circle-left"></i>
+                    </button>
+                    <span>{{name}}</span>
+
+                    <button class="btn btn-outline-danger ml-auto pull-right btn-delete-app mr-4">Delete application</button>
+                </h1>
+
+                <div class="container-fluid">
+                    <ul class="nav nav-tabs" id="app-menu" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-toggle="tab" href="#versions" role="tab" aria-controls="home" aria-selected="true">Versions</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-toggle="tab" href="#instanciations" role="tab" aria-controls="home" aria-selected="true">Instanciations</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="versions" role="tabpanel" aria-labelledby="versions-tab">
+                            <div class="row mt-4">
+                                <div class="col-lg-3 col-md-3 col-xs-3">
+                                    <div class="card card-app-desc">
+                                        <div class="card-header">
+                                            Details
+                                        </div>
+                                        <div class="card-body" style="padding-top: 10px; min-height: 308px; position: relative;">
+                                            <div class="app-name mb-2">
+                                                <p style="margin-bottom: 4px;">
+                                                    <span class="label"><b>Name</b></span>
+                                                    <button type="button" class="btn btn-transparent btn-no-focus btn-xs app-edit-name text-right" style="display: inline-block;">
+                                                        <i class="fa fa-pencil"></i>
+                                                    </button>
+                                                </p>
+
+                                                <p style="font-size: 14px; margin-bottom: 0;">
+                                                {{name}}
+                                                </p>
+                                            </div>
+                                            <div class="app-description">
+                                                <p style="margin-bottom: 4px;">
+                                                    <span class="label"><b>Description</b></span>
+                                                    <button type="button" class="btn btn-transparent btn-no-focus btn-xs app-edit-description text-right" style="display: inline-block;">
+                                                        <i class="fa fa-pencil"></i>
+                                                    </button>
+                                                </p>
+
+                                                <p class="app-description-text" style="font-size: 14px; margin-bottom: 0;">
+                                                    {{#if description}}{{description}}{{else}}No description available.{{/if}}
+                                                </p>
+                                                <div class="app-description-edit" style="display: none;">
+                                                    <textarea class="app-description-input form-control" rows=5 placeHolder="enter a description for {{name}}">{{description}}</textarea>
+                                                    <button class="btn btn-primary mt-2 app-save-description">Save description</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col">
+                                    <div class="card card-deployments" style="display: inline-flex;">
+                                        <div class="card-header">
+                                            Deployments
+                                        </div>
+                                        <div class="card-body" style="padding-bottom: 10px;">
+                                            <div class="row" style="padding-left: 15px; padding-right: 15px;">
+                                                <div class="card card-phase card-phase-dev border-blue" data-phase="dev">
+                                                    <div class="card-header bg-blue">
+                                                        <a href="/apps/{{name}}/dev" target="_blank">dev</a>
+                                                    </div>
+                                                    {{#if isDeployedPhase "dev"}}
+                                                        <div class="card-body">
+                                                            {{#with getVersionFromPhase "dev"}}
+                                                                {{> VersionCard }}
+                                                            {{/with}}
+                                                        </div>
+                                                    {{else}}
+                                                        <div class="card-body" style="width: 196px; height: 200px; line-height: 150px;"><span class="text-muted"><i class="fa fa-circle-o"></i></span></div>
+                                                    {{/if}}
+                                                </div>
+                                                <div class="card card-phase card-phase-alpha border-green" data-phase="alpha">
+                                                    <div class="card-header bg-green">
+                                                        <a href="/apps/{{name}}/alpha" target="_blank">alpha</a>
+                                                    </div>
+                                                    {{#if isDeployedPhase "alpha"}}
+                                                        <div class="card-body">
+                                                            {{#with getVersionFromPhase "alpha"}}
+                                                                {{> VersionCard }}
+                                                            {{/with}}
+                                                        </div>
+                                                    {{else}}
+                                                        <div class="card-body" style="width: 196px; height: 200px; line-height: 150px;"><span class="text-muted"><i class="fa fa-circle-o"></i></span></div>
+                                                    {{/if}}
+                                                </div>
+                                                <div class="card card-phase card-phase-beta border-orange" data-phase="beta">
+                                                    <div class="card-header bg-orange">
+                                                        <a href="/apps/{{name}}/beta" target="_blank">beta</a>
+                                                    </div>
+                                                    {{#if isDeployedPhase "beta"}}
+                                                        <div class="card-body">
+                                                            {{#with getVersionFromPhase "beta"}}
+                                                                {{> VersionCard }}
+                                                            {{/with}}
+                                                        </div>
+                                                    {{else}}
+                                                        <div class="card-body" style="width: 196px; height: 200px; line-height: 150px;"><span class="text-muted"><i class="fa fa-circle-o"></i></span></div>
+                                                    {{/if}}
+                                                </div>
+                                                <div class="card card-phase card-phase-production border-red" data-phase="production">
+                                                    <div class="card-header bg-red">
+                                                        <a href="/apps/{{name}}/production" target="_blank">production</a>
+                                                    </div>
+                                                    {{#if isDeployedPhase "production"}}
+                                                        <div class="card-body">
+                                                            {{#with getVersionFromPhase "production"}}
+                                                                {{> VersionCard }}
+                                                            {{/with}}
+                                                        </div>
+                                                    {{else}}
+                                                        <div class="card-body" style="width: 196px; height: 200px; line-height: 150px;"><span class="text-muted"><i class="fa fa-circle-o"></i></span></div>
+                                                    {{/if}}
+                                                </div>
+                                            </div>
+                                            <div class="row mt-2" style="text-align: center; font-size: 12px;">
+                                                <span class="ml-auto mr-auto">drag &amp; drop versions to theses boxes</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="card card-versions">
+                                        <div class="card-header">Versions</div>
+                                        <div class="card-body d-flex justify-content-left flex-wrap">
+                                            {{#each getVersions}}
+                                                {{> VersionCard }}
+                                            {{/each}}
+
+                                            <div class="card card-version card-new-version d-inline-block" style="text-align: center; position: relative; vertical-align: top;">
+                                                <div style="position: absolute; top: 0; left: 0; right; 0; margin: 10px auto; width: 100%;">
+                                                    <p style="margin: 0;">Add</p>
+                                                </div>
+                                                <div style="position: absolute; top: 0; bottom: 0; left: 0; right: 0; margin: auto; height: 30px;">
+                                                    <i class="fa fa-plus-circle text-blue" style="font-size: 30px; color: blue; display: block;"></i>
+                                                </div>
+                                                <div style="position: absolute; bottom: 0; left: 0; right; 0; margin: 10px auto; width: 100%;">
+                                                    <p style="margin: 0;">new version</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane" id="instanciations" role="tabpanel" aria-labelledby="instanciations-tab">
+                            <div class="mt-4">
+                                {{> InstanciationsChart app=name}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{/with}}
+            {{/if}}
+        {{else}}
+            {{> Loading }}
+        {{/if}}
+    </div>
+</template>
+
+<template name="VersionCard">
+    <div class="card card-version" draggable="true" data-version="{{appVersion}}" title="{{changelog}}">
+        <div class="card-header">
+            {{#if title}}
+                <span>{{title}}</span>
+            {{else}}
+                <span>No title</span>
+            {{/if}}
+        </div>
+        <div class="card-body">
+            <a href="/apps/{{appName}}/v/{{appVersion}}" class="link-to-version-page" draggable="false">{{appVersion}}</a>
+        </div>
+        <div class="card-footer">
+            {{{getStatusHTML}}}
+        </div>
+    </div>
+</template>
+
+<!--
+    Root page of a version
+    This template works as well for a new version or for an edit
+-->
+<template name="VersionPage">
+    <div class="page page-full-height bg-white version-page">
+        {{#if ready}}
+            {{#if emptyVersion}}
+                <p class="mx-auto" style="margin-top: 200px; text-align: center;"></p>
+                {{> Template404 message="This version doesn't exist, was deleted, or you don't have access to it."}}
+            {{else}}
+                {{#with getApp}}
+                <h1 class="page-header">
+                    <button class="btn btn-lg btn-transparent link-to-versions" style="font-size: 24px;">
+                        <i class="fa fa-arrow-circle-left"></i>
+                    </button>
+                    <span>{{name}}</span>
+                    {{#if isNewVersion}}
+                        <i style="font-size: 28px;" class="fa fa-caret-right ml-2 mr-2"></i>
+                        <span style="font-size: 28px;">New version</span>
+                    {{else}}
+                        {{#with getVersion}}
+                        <i style="font-size: 28px;" class="fa fa-caret-right ml-2 mr-2"></i>
+                        <span style="font-size: 28px;">{{appVersion}}</span>
+                        <small style="font-size: 14px;">last updated {{getLastUpdate}} </small>
+                        <div class="pull-right">
+                            {{{getStatusHTML}}}
+                        </div>
+                        {{/with}}
+                    {{/if}}
+                </h1>
+                {{/with}}
+
+                <ul class="nav nav-tabs" id="app-sections" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-toggle="tab" href="#configuration" role="tab" aria-controls="home" aria-selected="true">Configuration</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-toggle="tab" href="#application" role="tab" aria-controls="home" aria-selected="true">Application</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-toggle="tab" href="#instanciations" role="tab" aria-controls="home" aria-selected="true">Instanciations</a>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="configuration" role="tabpanel" aria-labelledby="home-tab">
+                        <div class="row pb-5 mt-4">
+                            <div class="col-4">
+                                <div class="card">
+                                    <div class="card-header">Version settings</div>
+                                    <div class="card-body">
+
+                                        {{#autoForm collection="AppVersions" id="version-settings-form" type=getFormType doc=getVersion}}
+                                        <fieldset>
+                                            {{#with getApp}}
+                                                <!-- hidden fields -->
+                                                {{> afQuickField name='appId' value=_id}}
+                                                {{> afQuickField name='appName' value=name}}
+                                            {{/with}}
+
+                                            {{> afQuickField name='title' placeHolder='Name your version'}}
+                                            {{> afQuickField name='changelog' placeHolder='Explain what changed in this version'}}
+                                            {{> afQuickField name='appVersion' placeHolder='The version number, in semver format (ex: 1.6.1)'}}
+                                        </fieldset>
+
+                                        <div class="mt-3" style="text-align: center;">
+                                            <button type="submit" class="btn btn-success btn-submit btn-submit-version-settings-form mr-3" disabled>
+                                                Save
+                                            </button>
+                                        </div>
+                                        {{/autoForm}}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col">
+                                <div class="card {{isCardHidden}}">
+                                    <div class="card-header">Code</div>
+                                    <div class="card-body">
+                                         {{#with getApp}}
+                                             {{#unless isNewVersion}}
+                                                 {{#if isInPhases}}
+                                                     <div class="alert alert-danger" role="alert">
+                                                         <p><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> This application is currently deployed in the following phases: <b>{{getVersionPhases}}</b>.<br/><br/>Please mind that if you trigger a compilation, <b>the application will be unavailable</b> until the deployment is finished.</p>
+                                                     </div>
+                                                 {{/if}}
+
+                                                 {{#with getVersion}}
+                                                     {{#if isDeployError}}
+                                                         {{#if buildError}}
+                                                             <div class="row" style="text-align: center;">
+                                                                 <div class="app-version-status" style="display: inline-block;">
+                                                                     <div class="build-error" style="width: 100%; margin-top: 40px;">
+                                                                         <label>Last build error:</label><br/>
+                                                                         <textarea rows=20 readonly style="width: 100%; min-width: 500px;">{{buildError}}</textarea>
+                                                                     </div>
+                                                                 </div>
+                                                             </div>
+                                                         {{/if}}
+                                                     {{/if}}
+                                                 {{/with}}
+                                             {{/unless}}
+                                         {{/with}}
+
+                                        <fieldset style="margin-top: 20px;">
+                                            {{#autoForm collection="AppVersions" id="version-code-form" type=getFormType doc=getVersion}}
+                                            {{#with getApp}}
+                                                <!-- hidden fields -->
+                                                {{> afQuickField name='appId' value=_id}}
+                                                {{> afQuickField name='appName' value=name}}
+                                            {{/with}}
+
+                                            <!-- shown fields -->
+                                            <div class="col-md-12" style="padding-left: 0px;">
+                                                <div>
+                                                    <label style="display: inline-block;">Json definition</label>
+                                                    <select class="json-import" style="float: right;">
+                                                        <option selected disabled>Import JSON from</option>
+                                                        {{#each otherVersions}}
+                                                        <option value="{{appVersion}}">{{appVersion}}</option>
+                                                        {{/each}}
+                                                    </select>
+                                                </div>
+                                                <div id="json-editor" class="mb-2"></div>
+                                            </div>
+
+                                            {{> afQuickField name='debugBuild'}}
+
+                                            <div class="mt-3" style="text-align: center;">
+                                                <button type="submit" class="btn btn-success btn-submit mr-3">Build</button>
+                                            </div>
+                                            {{/autoForm}}
+                                        </fieldset>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="application" role="tabpanel" aria-labelledby="application-tab">
+                        {{#unless isNewVersion}}
+                            {{#with getApp}}
+                                {{#with getVersion}}
+                                    {{> ShowVersion }}
+                                {{/with}}
+                            {{/with}}
+                        {{/unless}}
+                    </div>
+                    <div class="tab-pane fade" id="instanciations" role="tabpanel" aria-labelledby="instanciations-tab">
+                        {{#unless isNewVersion}}
+                            {{#with getApp}}
+                                {{#with getVersion}}
+                                    <div class="mt-4">
+                                        {{> InstanciationsChart app=appName version=appVersion}}
+                                    </div>
+                                {{/with}}
+                            {{/with}}
+                        {{/unless}}
+                    </div>
+                </div>
+            {{/if}}
+        {{else}}
+            {{> Loading }}
+        {{/if}}
+    </div>
+</template>
+
+<!-- instanciate a Dualbox App version -->
+<template name="ShowVersion">
+    <div id="dualbox-app" style="width 100%; height: 100%;"></div>
+</template>
+
+<!-- Root page of an app -->
+<template name="BuildErrorPage">
+    <div class="page page-full-height bg-white">
+        {{#with getApp}}
+        <h1 class="page-header">
+            <button class="btn btn-lg btn-transparent btn-back link-to-version-page" style="font-size: 24px;">
+                <i class="fa fa-arrow-circle-left"></i>
+            </button>
+            <span>{{name}}</span>
+
+            {{#with getVersion}}
+                <i style="font-size: 28px;" class="fa fa-caret-right ml-2 mr-2"></i>
+                <span style="font-size: 28px;">{{appVersion}}</span>
+
+                <i style="font-size: 28px;" class="fa fa-caret-right ml-2 mr-2"></i>
+                <span style="font-size: 24px;">Build <i>{{buildId}}</i></span>
+            {{/with}}
+
+        </h1>
+        {{/with}}
+
+        {{#with getVersion}}
+        <div class="form-group">
+            <label for="build-logs">Build Logs:</label>
+            <textarea class="form-control" rows="30" id="build-logs" value="{{buildError}}"></textarea>
+        </div>
+        {{/with}}
+    </div>
+</template>
+
+
+<!-- instanciate a Dualbox app phase -->
+<template name="ApplicationPhasePage">
+    <div class="container-fluid">
+        <h1 style="display: inline-block;">{{appName}}</h1>
+        <span class="badge" style="position: relative; background-color: red;">{{appPhase}}</span>
+        <div class="view-app-phase">
+            {{#with getVersion}}
+                {{> ShowVersion }}
+            {{/with}}
+        </div>
+    </div>
+</template>
+
+<template name="AppsBuildingPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">
+            <button class="btn btn-lg btn-transparent link-to-dashboard" style="font-size: 24px;">
+                <i class="fa fa-arrow-circle-left"></i>
+            </button>
+            <span>All builds</span>
+        </h1>
+
+        <p class="form-inline">Show app applications and versions with build status 
+            <select class="form-control form-inline select-status" style="margin: 10px;">
+                <option value="Not deployed">no build yet</option>
+                <option value="in queue">in queue</option>
+                <option value="building..." selected>building</option>
+                <option value="built">deploying</option>
+                <option value="deployed">ready</option>
+                <option value="error">error</option>
+            </select>
+        </p>
+
+        <table class="table table-striped apps-building" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>status</th>
+                    <th>Application</th>
+                    <th>Version</th>
+                    <th>Last update</th>
+                    <th>title</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each getVersions}}
+                <tr>
+                    <td>{{{getStatusHTML}}}</td>
+                    <td><a href="/apps/{{appName}}" title="{{title}}">{{getName}}</a></td>
+                    <td><a href="/apps/{{appName}}/v/{{appVersion}}" title="{{title}}">{{appVersion}}</a></td>
+                    <td>{{getLastUpdate}}</td>
+                    <td>{{title}}</td>
+                </tr>
+                {{/each}}
+            </tbody>
+        </table>
+    </div>
+</template>

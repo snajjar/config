@@ -1,0 +1,91 @@
+<template name="SettingsPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">Settings</h1>
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-sm-2">
+                    <nav class="nav nav-pills flex-column">
+                        <p class="nav-separator">Notifications</p>
+                        <a class="nav-link active" href="#SettingsProfile">profile</a>
+                        <a class="nav-link" href="#SettingsNotifications">preferences</a>
+                        <p class="nav-separator">Billing</p>
+                        <a class="nav-link" href="#SettingsVAT">VAT & taxes</a>
+                        <a class="nav-link" href="#SettingsBillingAddress">Billing Address</a>
+                        <p class="nav-separator">Plan</p>
+                        <a class="nav-link" href="#SettingsPlan">My plan</a>
+                    </nav>
+                </div>
+                <div class="col-sm-10">
+                    {{> Template.dynamic template=getActiveTemplate }}
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+
+<template name="SettingsProfile">
+    <h2>My profile</h2>
+    <div class="row">
+        <div class="col-md-6">
+        {{#autoForm collection="Meteor.users" id="user-settings-profile-form" type="update" doc=me}}
+            <fieldset>
+                {{> afQuickField name='profile.firstName'}}
+                {{> afQuickField name='profile.lastName'}}
+            </fieldset>
+            <button class="btn btn-primary" type="submit">Save</button>
+        {{/autoForm}}
+        </div>
+    </div>
+</template>
+
+<template name="SettingsNotifications">
+    {{#autoForm collection="Meteor.users" id="user-settings-notifications-form" type="update" doc=me}}
+        <fieldset>
+            {{> afQuickField name='profile.emailNotificationsPreferences'}}
+        </fieldset>
+        <button class="btn btn-primary" type="submit">Save</button>
+    {{/autoForm}}
+</template>
+
+<template name="SettingsBillingAddress">
+    <div class="row">
+        <div class="col-md-6">
+        {{#autoForm collection="Meteor.users" id="user-settings-billing-address-form" type="update" doc=me}}
+            <fieldset>
+                {{> afQuickField name='billingAddress'}}
+            </fieldset>
+            <button class="btn btn-primary" type="submit">Save</button>
+        {{/autoForm}}
+        </div>
+    </div>
+</template>
+
+<template name="SettingsVAT">
+    <h2>VAT & Taxes</h2>
+    <div class="row">
+        <div class="col-md-6">
+            {{#autoForm collection="Meteor.users" id="user-settings-billing-vat-form" type="update" doc=me}}
+                <fieldset>
+                    {{> afQuickField name='VATPolicy'}}
+                    {{> afQuickField name='VATIntracomm'}}
+                </fieldset>
+                <button class="btn btn-primary" type="submit">Save</button>
+            {{/autoForm}}
+        </div>
+    </div>
+</template>
+
+<template name="SettingsPlan">
+    <h2>My plan</h2>
+    <div class="row">
+        <div class="col-md-3">
+            {{#autoForm collection="Meteor.users" id="user-settings-plan-form" type="update" doc=me}}
+                <fieldset>
+                    {{> afQuickField name='plan'}}
+                </fieldset>
+                <button class="btn btn-primary" type="submit">Save</button>
+            {{/autoForm}}
+        </div>
+    </div>
+</template>

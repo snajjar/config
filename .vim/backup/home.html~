@@ -1,0 +1,79 @@
+<template name="ServerReturn">
+    <p style="color: {{getColor}}">{{getReturn}}</p>
+</template>
+
+<template name="LoginForm">
+    <div id="account-window">
+        <div id="resetpw-window" class="animated">
+            <form id="resetpw-form" class="form-inline">
+                <div class="form-group">
+                    <input type="email" class="form-control" id="resetpw-email" placeholder="E-mail">
+                </div>
+                <button type="submit" id="resetpw-button" class="btn btn-default">Me renvoyer le mot de passe</button>
+            </form>
+            <p id="resetpw-error" style="color:green;"></p>
+            <div class="account-helpers animated fadeIn" style="margin-top: 30px;">
+                <a href="#" class="back-to-login-form" style="font-size: 12px;">Revenir</a><br/>
+            </div>
+        </div>
+        <div id="login-window" class="animated bounceInRight">
+            <form id="login-form" class="form-inline">
+                <div class="form-group">
+                    <input type="email" class="form-control" id="login-email" placeholder="E-mail">
+                </div>
+                <div class="form-group">
+                    <input type="password" class="form-control" id="login-password" placeholder="Password">
+                </div>
+                <button type="submit" id="login-button" class="btn btn-default">Connexion</button>
+            </form>
+            <p id="login-error" style="color:red;"></p>
+            <div class="account-helpers animated fadeIn" style="margin-top: 30px;">
+                <a href="#" class="show-register-form" style="font-size: 12px;">Je n'ai pas de compte</a><br/>
+                <a href="#" class="show-resetpw-form"  style="font-size: 12px;">J'ai oublié mon mot de passe</a>
+            </div>
+        </div>
+        <div id="register-window" class="animated">
+            <form id="register-form" class="form-inline">
+                <div class="form-group">
+                    <input type="email" class="form-control" id="register-email" placeholder="E-mail">
+                </div>
+                <div class="form-group">
+                    <input type="password" class="form-control" id="register-password" placeholder="Password">
+                </div>
+                <button type="submit" id="register-button" class="btn btn-default">Créer mon compte</button>
+            </form>
+            <p id="register-error" style="color:red;"></p>
+            <div class="account-helpers animated fadeIn" style="margin-top: 30px;">
+                <a class="show-login-form" href="#">J'ai déjà un compte</a>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template name="PageLoginForm">
+    <h2 style="text-align: center; margin-top: 80px; font-size: 26px;">Vous devez vous connecter pour accéder à cette page.</h2>
+
+    {{> LoginForm}}
+</template>
+
+<!-- Home page template -->
+<template name="Home">
+    <div class="home">
+        <!--
+        <p style="text-align: left; margin-left: 10px; font-size: 36px; font-weight: 500; display: inline-block;">Podo<span style="color: #990000;">Metric</span></p>
+        -->
+        <div class="container" style="height: 100%;position: relative;">
+            <div class="crop" style="position: relative;">
+                <img src="img/logo/LogoScientiFeet.png" style="max-width: 100%;" />
+                <h1 style="text-align: center; font-family: Open Sans, Helvetica, sans-serif; color: #555; font-size: 24px; font-weight: 200;">La semelle paramétrable</h1>
+                <span class="badge" style="background-color: #960404; font-size: 20px; position: absolute; left: 0; right: -300px; top: 30px; bottom: 0; max-width: 60px; max-height: 26px; margin: auto;">{{environment}}</span>
+            </div>
+
+            {{> LoginForm}}
+
+            <div style="position: absolute; bottom: 20px; left: 0; right: 0; margin: 0px auto; text-align: center;">
+                <i style="color:black; font-size: 12px;">Pour plus d'information, écrivez-nous à <b>contact@scientifeet.com</b> où sur notre <a href="https://www.facebook.com/podometric" target="_blank" style="text-decoration: none;">page facebook</a>.</i>
+            </div>
+        </div>
+    </div>
+</template>

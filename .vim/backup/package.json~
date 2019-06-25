@@ -1,0 +1,57 @@
+{
+  "name": "@dualbox/editor",
+  "version": "1.0.24",
+  "description": "Editor of Dualbox apps",
+  "browser": "js/dist/GraphEditor.js",
+  "main": "js/dist/GraphEditor.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "node test.js",
+    "build": "rollup -c"
+  },
+  "author": "The Dualbox Team <contact@dualbox.com>",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "eslint-plugin-vue": "5.2.2",
+    "require-template": "^1.0.9",
+    "rollup": "1.14.4",
+    "rollup-plugin-commonjs": "10.0.0",
+    "rollup-plugin-embed-css": "0.4.0",
+    "rollup-plugin-eslint": "6.0.0",
+    "rollup-plugin-less": "1.1.2",
+    "rollup-plugin-node-resolve": "5.0.1",
+    "rollup-plugin-replace": "2.2.0",
+    "rollup-plugin-vue": "5.0.0"
+  },
+  "dependencies": {
+    "@babel/cli": "^7.2.3",
+    "@babel/core": "^7.2.2",
+    "@babel/preset-env": "^7.0.0-beta.46",
+    "@dualbox/dualbox-lib-appparser": "1.0.7",
+    "@dualbox/dualbox-lib-bootstrap": "^1.0.14",
+    "@dualbox/dualbox-lib-font-awesome": "5.6.3",
+    "@fortawesome/fontawesome-free": "^5.4.1",
+    "@mturco/context-menu": "^1.0.1",
+    "babelify": "^10.0.0",
+    "browserify-css": "^0.14.0",
+    "codemirror": "^5.43.0",
+    "cssify": "^1.0.3",
+    "fontawesome": "^5.6.3",
+    "hash-it": "4.0.4",
+    "idx": "^2.3.0",
+    "jsoneditor": "^5.27.0",
+    "jsplumb": "2.1.8",
+    "lodash": "^4.17.5",
+    "moment": "^2.22.2",
+    "rollup-plugin-node-builtins": "2.1.2",
+    "sweetalert2": "^7.19.3"
+  },
+  "files": [
+    "css/*",
+    "html/*",
+    "js/*",
+    "lib/*"
+  ]
+}

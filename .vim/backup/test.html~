@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>A boxscale example</title>
+    <style>
+        body {
+            font-family: Monospace;
+            background-color: #f0f0f0;
+            margin: 0px;
+            overflow: hidden;
+        }
+
+        #canvas {
+            width: calc(100% - 430px);
+            height: calc(100% - 200px);
+            border: 1px solid red;
+            margin: 100px;
+            position: absolute;
+            left: 0;
+        }
+
+        #box {
+            width: 300px;
+            height: calc(80% - 200px);
+            min-height: 200px;
+            margin-right: 20px;
+            margin-top: 100px;
+            margin-bottom: 20px;
+            position: absolute;
+            right: 0;
+        }
+
+        #screenshot {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            z-index: 1500;
+            width: 200px;
+            height: 40px;
+        }
+
+        #screenshot-img {
+            position: absolute;
+            bottom: 140px;
+            right: 20px;
+            z-index: 1500;
+            width: 200px;
+            height: 200px;
+            border: 1px solid red;
+        }
+    </style>
+</head>
+
+<body>
+    <script src="./shapex3d.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,62 @@
+Template.BillingPage.onCreated(function() {
+    this.selectedInvoice = new ReactiveVar();
+
+    this.autorun(() => {
+        subMgr.subscribe('user_InstanciationsMonth');
+        subMgr.subscribe('user_Invoices', { 'published': true }, {
+            onReady: () => {
+                var lastInvoice = Invoices.findOne({ 'published': true }, { sort: { year: -1, month: -1 }});
+                this.selectedInvoice.set(lastInvoice);
+            }
+        });
+    });
+});
+
+Template.BillingPage.helpers({
+    hasInvoices : function() {
+        return Invoices.find().count() > 0;
+    },
+
+    has2Invoices : function() {
+        return Invoices.find().count() > 1;
+    },
+
+    getInvoices : function() {
+        return Invoices.find({ 'published': true }, { sort: { year: -1, month: -1 }});
+    },
+
+    getInvoiceDate : function() {
+        return this.getMoment();
+    },
+
+    getSelectedInvoice : function() {
+        return Template.instance().selectedInvoice.get();
+    },
+
+    getInstanciations : function() {
+        var t = Template.instance();
+        return InstanciationsMonth.find({
+            'year'  : t.selectedInvoice.get().year,
+            'month' : t.selectedInvoice.get().month,
+        }, {
+            sort : { appName: 1, versionName: 1 }
+        });
+    },
+
+    hasAdvancedLogging : function() {
+        return this.getMoment().isAfter( moment("2018-02-21") );
+    },
+});
+
+Template.BillingPage.events({
+    "click .link-to-dashboard" : function(e, t) {
+        Router.go('DashboardPage');
+    },
+
+    "click .select-month" : function(e, t) {
+        e.preventDefault();
+        var invoiceId = $(e.target).val();
+        var invoice = Invoices.findOne(invoiceId);
+        t.selectedInvoice.set(invoice);
+    }
+});

@@ -1,0 +1,34 @@
+<template name="InstanciationsPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">
+            <button class="btn btn-lg btn-transparent link-to-dashboard" style="font-size: 24px;">
+                <i class="fa fa-arrow-circle-left"></i>
+            </button>
+            <span>Instanciations</span>
+        </h1>
+
+        <p class="form-inline">Show instanciations history for app
+            <select class="form-control form-inline select-app" style="margin: 10px;">
+                <option value="all">All apps</option>
+                {{#each getApps}}
+                <option value="{{_id}}">{{getName 30}}</option>
+                {{/each}}
+            </select>
+            &nbsp;version&nbsp;
+            <select class="form-control form-inline select-version" style="margin: 10px;">
+                <option value="all">All versions</option>
+                {{#each getAppVersions}}
+                <option value="{{_id}}">{{appVersion}}</option>
+                {{/each}}
+            </select>
+            &nbsp;from&nbsp;
+            <input type="text" class="form-control form-inline instanciations-from" style="width: 200px; display: inline-block; margin: 10px;" placeHolder="dd/mm/yyyy" value="01/02/2018">
+            &nbsp;to&nbsp;
+            <input type="text" class="form-control form-inline instanciations-to" style="width: 200px; display: inline-block; margin: 10px;" placeHolder="dd/mm/yyyy" value="{{today}}">
+        </p>
+
+        {{#with getChartData}}
+            {{> InstanciationsChart app=app version=version from=from to=to }}
+        {{/with}}
+    </div>
+</template>

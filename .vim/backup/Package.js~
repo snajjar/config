@@ -1,0 +1,734 @@
+/**
+ *  Class to handle DualBox packages
+ */
+var colors = require('colors');
+var cp = require('child_process');
+var path = require('path');
+var _ = require('lodash');
+var fs = require('fs-extra');
+var crypto = require('crypto');
+var dpmJson = require('../dpm/package.json');
+var semver = require('semver');
+
+// build stuff
+var browserify = require('browserify');
+var browserifycss = require('browserify-css');
+var rollupify = require('rollupify');
+var imgurify = require('imgurify');
+
+// return the full path of the folder
+function absolutePath(p) {
+    if( path.isAbsolute(p) ) {
+        return p;
+    }
+    return path.join(process.cwd(), p );
+}
+
+function relativePath(p) {
+    if( path.isAbsolute(p) ) {
+        return path.relative(process.cwd(), p);
+    }
+    return p;
+}
+
+function findFilesInDir(startPath, filter){
+    var results = [];
+
+    var isExcluded = function(filename) {
+        var exclude = [ "node_modules", "dist", "standalone", ".orig", "package.json" ];
+        var isExcluded = false;
+        _.each(exclude, function(ex) {
+            if( filename.indexOf(ex) !== -1 ) {
+                isExcluded = true;
+            }
+        });
+        return isExcluded;
+    }
+
+    if (!fs.existsSync(startPath)){
+        return;
+    }
+
+    var files=fs.readdirSync(startPath);
+    for(var i=0;i<files.length;i++){
+        var filename=path.join(startPath,files[i]);
+        var stat = fs.lstatSync(filename);
+        if (stat.isDirectory()) {
+            if( !isExcluded(filename) ) {
+                results = results.concat(findFilesInDir(filename,filter));
+            }
+        }
+        else if(!isExcluded(filename) && filename.indexOf(filter)>=0) {
+            results.push(filename);
+        }
+    }
+    return results;
+}
+
+// take a group of files and extract the hash
+var makeFileHash = function( files ) {
+    var hash = crypto.createHash("sha1");
+    _.each(files, function(file, i) {
+        hash.update( fs.readFileSync(file) );
+    });
+    return hash.digest('hex');
+}
+
+// make hash from a group of strings
+var makeStringHash = function( strings ) {
+    var hash = crypto.createHash("sha1");
+    _.each(strings, function(string, i) {
+        if( string !== undefined ) {
+            hash.update( string );
+        }
+    });
+    return hash.digest('hex');
+}
+
+// return an array of folders in directory
+function getFolders(dir) {
+    return fs.readdirSync(dir).filter(function(file) {
+        return file[0] != "." && fs.statSync(path.join(dir, file)).isDirectory();
+    });
+}
+
+class Package {
+    constructor(p) {
+        this.rootPath = absolutePath(path.join(__dirname, ".."));
+        this.path     = relativePath(path.join(this.rootPath, relativePath(p)));
+        this.absPath  = absolutePath(path.join(this.rootPath, this.path));
+
+        try {
+            this.pkg  = require(path.join(this.absPath, "package.json"));
+        }
+        catch(e) {
+            console.error(("Folder " + this.absPath + " has no package.json. Do you mind fixing it?").red);
+            throw e;
+        }
+
+        this.registryPKG = null; // if we run "yarn info", cache result
+        this.name = this.pkg.name;
+    }
+
+    execSync(cmd, options) {
+        if( !options ) options = {};
+
+        // set path for the command
+        if( !options.cwd ) {
+            options.cwd = this.absPath;
+        }
+
+        //console.log('exec: ' + cmd.yellow + ' from ' + options.cwd.yellow);
+        var output = cp.execSync(cmd, options);
+        if( output ) {
+            var outputStr = output.toString('utf8');
+            outputStr = outputStr.substr(0, outputStr.length-1); // remove the \n
+            return outputStr;
+        }
+        else {
+            return null;
+        }
+    }
+
+    isRequirable() {
+        try {
+            require(this.name);
+            return true;
+        }
+        catch(e) {
+            return this.name == "dualbox-dpm"; // dpm is an exception
+        }
+    }
+
+    getDualBoxDependencies() {
+        var deps = {};
+        _.each( this.pkg.dependencies, (version, name) => {
+            if( name.startsWith('dualbox') ) {
+                deps[name] = version;
+            }
+        });
+        return deps;
+    }
+
+    install(force = false) {
+        var installHashFile = path.join(this.path, ".installhash");
+        var newInstallHash = this.installHash();
+
+        var needInstall = true;
+        if( (!force && this.isRequirable()) || this.pkg.name === "dualbox-dpm" ) {
+            /*
+            // install hash check: don't install if it's not needed
+            if( fs.existsSync( installHashFile ) ) {
+                // we got an install hash, check if something has changed
+                var oldInstallHash = fs.readFileSync( installHashFile );
+                if( oldInstallHash == newInstallHash ) {
+                    if( this.isRequirable() || this.pkg.name === "dualbox-dpm" ) {
+                        needInstall = false;
+                    }
+                    else {
+                        console.log(("[*] " + this.name + " can't be required. Reinstalling.").red);
+                    }
+                }
+                else {
+                    console.log(("[*] " + this.name + " install hash has changed. Reinstalling.").green);
+                }
+            }
+            else {
+                console.log(("[*] installing " + this.pkg.name + " packages...").green);
+            }
+            */
+            needInstall = false;
+        }
+
+        if( needInstall ) {
+            // install and link manually all dependencies
+            // If it's a dualbox package, link it. Otherwise, yarn add it
+            console.log(("[*] installing " + this.pkg.name + " packages...").green);
+
+            // install dependencies
+            var deps = Object.keys(this.pkg.dependencies || {});
+            for(var i=0; i<deps.length; i++) {
+                var dep = deps[i];
+                if( dep.indexOf('dualbox') === -1 ) {
+                    // it's a real node package, not a dualbox one. install
+                    console.log("    [*] installing dependency " + dep);
+                    this.execSync('yarn add ' + dep + ' -s --registry ' + dpmJson.spmRegistry);
+                }
+                else {
+                    // reinstall all dependencies we can't require
+                    try {
+                        require(dep);
+                    }
+                    catch(e) {
+                        console.log(('    [*] could not require dependency: ' + dep + '.').red);
+                        /*
+                        var module = Repo.instance().getPackage(dep);
+                        module.install(true);
+                        */
+                    }
+
+                    // it's a dualbox package, at this stage it should be linked. yarn link it
+                    console.log("    [*] linking dependency " + dep);
+                    this.execSync('yarn link ' + dep + ' -s --registry ' + dpmJson.spmRegistry);
+                }
+            }
+
+            // install devDependencies too
+            var devDeps = Object.keys(this.pkg.devDependencies || {});
+            for(var i=0; i<devDeps.length; i++) {
+                var dep = devDeps[i];
+                if( dep.indexOf('dualbox') === -1 ) {
+                    // it's a real node package, not a dualbox one. install
+                    console.log("    [*] installing dependency " + dep);
+                    this.execSync('yarn add ' + dep + ' -s --registry ' + dpmJson.spmRegistry);
+                }
+                else {
+                    // it's a dualbox package, at this stage it should be linked. yarn link it
+                    console.log("    [*] linking dependency " + dep);
+                    this.execSync('yarn link ' + dep + ' -s --registry ' + dpmJson.spmRegistry);
+                }
+            }
+
+            // extract all install hash
+            fs.writeFileSync( installHashFile, newInstallHash );
+            console.log(("    [*] install hash: " + newInstallHash).green);
+
+            // build if needed
+            this.build();
+
+            // then, remove all the dualbox-related stuff in the node_modules for linking
+            // cleanFolderNodeModule(folder);
+
+            // finally, link the folder
+            this.link();
+        }
+        else {
+            console.log(("[*] no need to install " + this.pkg.name + " : already up to date").yellow);
+        }
+
+        // check if requiring works
+        try {
+            require(this.pkg.name);
+        }
+        catch(e) {
+            if( this.pkg.name !== "dualbox-dpm" ) {
+                console.error(('    [*] installation of ' + this.pkg.name + ' failed: package is not requirable').red);
+            }
+        }
+    }
+
+    link() {
+        this.updateDeps();
+
+        // link folder dependencies before "yarn link" install them with copy
+        console.log(("[*] installing links for folder " + this.path).green);
+        _.each( this.pkg.dependencies, (version, depName) => {
+            if( depName.startsWith('dualbox') ) {
+                console.log(("    [*] linking locally " + depName).grey);
+                this.execSync('yarn link ' + depName + ' -s --registry ' +  dpmJson.spmRegistry);
+            }
+        });
+
+        // publish the folder on the local yarn filesystem
+        console.log(("    [*] publishing " + this.path + " globally..").green);
+        this.execSync('yarn link -s --registry ' + dpmJson.spmRegistry);
+
+        // link to project root folder
+        console.log(("    [*] linking " + this.path + " to project root...").green);
+        this.execSync('yarn link -s ' + this.pkg.name + ' --registry ' + dpmJson.spmRegistry, { cwd: this.rootPath });
+
+        /*
+        // link what's needed from every module, lib and stuff
+        var modules = Object.keys(depMap);
+        for(let i=0; i<modules.length; i++) {
+            // require package.json to find dependencies
+            let module = modules[i];
+            let p      = depMap[module];
+            let mpkg = require(p + '/package.json');
+
+            // if the module contains dependency to this folder, link it
+            if( mpkg.dependencies ) {
+                if( this.pkg.name in mpkg.dependencies ) {
+                    console.log(("    [*] " + module + " depends on " + this.pkg.name + ", linking...").green);
+                    this.execSync('yarn link ' + this.pkg.name + ' --registry ' + dpmJson.spmRegistry, { cwd: p });
+                }
+            }
+
+            // if this folder have a dependency to this module, link it
+            if( this.pkg.dependencies ) {
+                if( mpkg.name in this.pkg.dependencies ) {
+                    console.log(("    [*] " + this.pkg.name + " depends on " + mpkg.name + ", linking...").green);
+                    this.execSync('yarn link ' + mpkg.name + ' --registry ' + dpmJson.spmRegistry);
+                }
+            }
+        }
+        */
+    }
+
+    uninstall() {
+        console.log(('[*] uninstalling ' + this.path).green);
+        _.each( this.pkg.dependencies, (depVersion, depName) => {
+            if( depName.startsWith('dualbox') ) {
+                try {
+                    this.execSync('yarn unlink ' + depName + ' -s --registry ' + dpmJson.spmRegistry, { stdio:  'ignore' });
+                }
+                catch(e) {}
+            }
+        });
+        try {
+            this.execSync('yarn unlink ' + this.pkg.name + ' -s --registry ' + dpmJson.spmRegistry, { cwd: this.rootPath, stdio: 'ignore' });
+        }
+        catch(e) {}
+
+        fs.removeSync( path.join( this.absPath, "node_modules") );
+        fs.removeSync( path.join( this.absPath, ".installhash") );
+        fs.removeSync( path.join( this.absPath, ".installhash") );
+        if( fs.existsSync( path.join( this.absPath, "dist", ".sourcehash") ) ) {
+            fs.removeSync( path.join( this.absPath, "dist", ".sourcehash") );
+        }
+    }
+
+    // update all dualbox dependencies
+    updateDeps() {
+        var update = false;
+
+        var pkg = JSON.parse(JSON.stringify(this.pkg));
+        _.each(pkg.dependencies, (depVersion, depName) => {
+            if( depName.startsWith('dualbox') ) {
+                var module = Repo.instance().getPackage(depName);
+                var newVersion = "^" + module.pkg.version;
+                if( depVersion !== newVersion ) {
+                    console.log(('    [*] updating dependency to ' + depName + ' from ' + depVersion + ' to ' + newVersion).green);
+                    pkg.dependencies[depName] = newVersion;
+                    update = true;
+                }
+            }
+        });
+
+        if( update ) {
+            fs.writeFileSync( path.join(this.path, "package.json"), JSON.stringify(pkg, null, 2));
+        }
+    }
+
+    // version: check current version if no version provided
+    isPublished(version = null) {
+        version = version ? version : this.pkg.version;
+        var registryPKG = this.getPkgInfos();
+        return registryPKG.versions.indexOf(version) !== -1;
+    }
+
+    // get the next non-published version patch
+    getNextVersion() {
+        var registryPKG = this.getPkgInfos();
+        if( registryPKG === null ) {
+            return "1.0.0";
+        }
+
+        var version = registryPKG.version;
+        while( this.isPublished(version) ) {
+            version = semver.inc(version, "patch");
+        }
+
+        return version;
+    }
+
+    checkPublished() {
+        if( this.isPublished() ) {
+            console.log(("    [*] " + this.name + " (v: " + this.pkg.version + ") is published").green);
+        }
+        else {
+            console.warn(("    [*] " + this.name + " (v: " + this.pkg.version + ") isn't published yet").yellow);
+        }
+    }
+
+    // update package.json version based on the source hash
+    updatePackage(force = false) {
+        if( this.pkg.hash !== this.hash() || force ) {
+            var pkg = JSON.parse(JSON.stringify(this.pkg));
+            pkg.hash = this.hash();
+            pkg.version = this.getNextVersion();
+            fs.writeFileSync( path.join(this.path, "package.json"), JSON.stringify(pkg, null, 2));
+            console.log('[*] incremented ' + this.pkg.name + ' version to ' + pkg.version);
+            this.pkg = pkg;
+        }
+    }
+
+    build(force) {
+        var buildHashFile = path.join(this.path, "dist", ".sourcehash");
+        var build = () => {
+            console.log(('[*] building ' + this.path).green);
+            try {
+                this.execSync("yarn run build");
+                fs.writeFileSync(buildHashFile, this.hash());
+            }
+            catch(e) {
+                console.error('Error building ' + this.pkg.name + ' : ' + e);
+            }
+        };
+
+        // check if the folder needs to be built ('build' script present in package.json)
+        if( this.pkg && this.pkg.scripts && this.pkg.scripts.build ) {
+            // check if we have already built it (and we're not in a forced command)
+            if( fs.existsSync(buildHashFile) && !force ) {
+                // check if the build hash is the same as the actual sources
+                var oldSourceHash = fs.readFileSync(buildHashFile);
+                var newSourceHash = this.hash();
+
+                if( oldSourceHash != newSourceHash ) {
+                    // we need to rebuild
+                    build();
+                }
+                else {
+                    console.log(('[*] no need to build ' + this.path).yellow);
+                }
+            }
+            else {
+                build();
+            }
+        }
+    }
+
+    browserify(targetStream, done) {
+        // extract all dualbox components names
+        // they shall be built only 1 time
+        // so we'll pass this array as externals to browserify
+        var components = Object.keys(Repo.instance().getPackages());
+        components = components.filter(val => val.indexOf('dualbox') == 0);
+        components.splice(components.indexOf('dualbox-spm'), 1);
+
+        // browserify our module
+        browserify({ debug: true, fullPaths: true})
+            .external( _.without(components, this.pkg.name) )
+            .require(this.pkg.name)
+            .transform(rollupify)
+            .transform(browserifycss, { autoInject: true, global: true })
+            .transform("imgurify")
+            .bundle()
+            .pipe(targetStream)
+            .on('error', function(err) {
+                done(err);
+            });
+    }
+
+    bump(force) {
+        var registryPKG = this.getPkgInfos();
+        if( !registryPKG || this.hash() !== registryPKG.hash || force ) {
+            console.log(('[*] Publishing ' + this.pkg.name + " (version: " + this.pkg.version + ")").green);
+            try {
+                this.execSync('dpm publish', { silent: true });
+            }
+            catch(e) {
+                var version = this.getNextVersion();
+                console.log(('    [*] Publishing ' + this.pkg.name + ' failed. Updating version to "' + version + '" and retrying.').yellow);
+                this.updatePackage(true); // force update
+                try {
+                    this.execSync('dpm publish', { silent: true });
+                    console.log(('[*] Published ' + this.pkg.name + " (version: " + this.pkg.version + ")").green);
+                }
+                catch(e) {
+                    console.log(('[*] Publishing ' + this.pkg.name + ' failed.').red);
+                }
+            }
+        }
+        else {
+            console.log(('[*] ' + this.pkg.name + " is matching the last published version (" + registryPKG.version + ")").yellow);
+        }
+    }
+
+    // hash the sources
+    sourceHash() {
+        var files = findFilesInDir(this.path, ".js");
+        files = files.concat( findFilesInDir(this.path, ".css") );
+        files = files.sort(); // sort files to guarantee order
+        return makeFileHash( files );
+    }
+
+    // hash the sources + package.json (without the "version" and "hash")
+    hash() {
+        var sourceHash = this.sourceHash();
+
+        // clone the package.json but delete version and sourceHash
+        var pkg = JSON.parse(JSON.stringify(this.pkg));
+        delete pkg.version;
+        delete pkg.hash;
+
+        return makeStringHash([sourceHash, JSON.stringify(pkg)]);
+    }
+
+    // installation hash
+    installHash() {
+        return makeStringHash([
+            JSON.stringify(this.pkg.dependencies),
+            JSON.stringify(this.pkg.devDependencies),
+            JSON.stringify(this.pkg.otherDependencies)
+        ]);
+    }
+
+    // infos from yarn info
+    getPkgInfos() {
+        if( this.registryPKG ) {
+            return this.registryPKG;
+        }
+        else {
+            try {
+                var jsonStr = this.execSync('yarn info ' + this.pkg.name + ' -s --json --registry ' +  dpmJson.spmRegistry, {
+                    stdio: ['pipe', 'pipe', 'ignore'] });
+                this.registryPKG = JSON.parse(jsonStr).data;
+                return this.registryPKG;
+            }
+            catch(err) {
+                //console.error("get published package error: " + err);
+                return null;
+            }
+        }
+    }
+
+    // return a sha1 string identifying the package
+    // if local is true, identify the local package. Otherwise, identify the last published version
+    checksum(local = true) {
+        if( local ) {
+            return this.hash();
+        }
+
+        /*
+        var checksum = null;
+
+        try {
+            checksum = this.execSync('dpm checksum' + (local? "":" --published"));
+            checksum = checksum.replace(/\s/g, ''); // remove trailing spaces
+        }
+        catch(err) {
+            console.error("get checksum error: " + err);
+        }
+
+        return checksum;
+        */
+    }
+
+    static fromPath(p) {
+        // get the absolute path
+        if( !Package.instances[p] ) {
+            Package.instances[p] = new Package(p);
+        }
+        return Package.instances[p];
+    }
+
+    static fromName(n) {
+        // find the path in the name
+        try {
+            var packageJsonPath = require.resolve(n + "/package.json");
+            var rootPath = path.dirname( packageJsonPath );
+            return Package.fromPath(rootPath);
+        }
+        catch(e) {
+            console.error((n + " isn't an installed dualbox component").red);
+            return null;
+        }
+    }
+}
+Package.instances = [];
+
+
+/*******************************************************************************
+ *  Class to get all DualBox components in a dependency-friendly order
+ ******************************************************************************/
+class Repo {
+    constructor() {
+        // build the dependency array
+        this.list = [];
+        this.packages = null;
+
+        this._addNode( "dualbox", absolutePath("dualbox") );
+        this._addNode( "dualbox-dpm", absolutePath("dpm") );
+
+        // Initialize all repos setup
+        this.repos = this._readRepos();
+
+        // add repos libraries
+        _.each(this.repos, (repo) => {
+            this._scanRepo("lib", repo);
+        });
+
+        // add repos uis
+        _.each(this.repos, (repo) => {
+            this._scanRepo("ui", repo);
+        });
+
+        // add repos modules
+        _.each(this.repos, (repo) => {
+            this._scanRepo("modules", repo);
+        });
+
+        this._sort();
+    }
+
+    // scan a repository for a type of component ("lib", "ui" or "modules"), add them into
+    // the Repo
+    _scanRepo(type, dirPath) {
+        var dirName = "dualbox_" + type;
+        var p = path.join(dirPath, dirName);
+        var prefix = type == "modules" ? "dualbox-module-" : "dualbox-" + type + "-";
+
+        if( fs.existsSync(p) ) {
+            getFolders(p).map((d) => {
+                this._addNode(prefix + d,  absolutePath(path.join(p, d)));
+            });
+        }
+    }
+
+    // get the list of path from .dualboxrc
+    _readRepos() {
+        var repos = [ process.cwd() ];
+
+        // if .dualboxrc, add all path in it
+        if( fs.existsSync('.dualboxrc') ) {
+            var txt = fs.readFileSync('.dualboxrc', 'utf8');
+            var lines = txt.split('\n');
+            _.each(lines, (line) => {
+                line = line.trim();
+                if( !line.startsWith('#') ) { // discard comment lines
+                    if( line.length > 0 ) {
+                        repos.push(line);
+                    }
+                }
+            });
+        }
+
+        return repos;
+    }
+
+    getRepos() {
+        return this.repos;
+    }
+
+    // add a node from it's path
+    _addNode( name, path ) {
+        var p = Package.fromPath(path);
+
+        this.list.push({
+            name: name,
+            path: path,
+            deps: p.getDualBoxDependencies()
+        });
+    }
+
+    // sort all components of the list in a dependency friendy way
+    _sort() {
+        var newList = [];
+
+        while( newList.length !== this.list.length ) {
+            // move out of this.list all components that already have all their dependencies in newList
+            _.each(this.list, (c) => {
+                var allDepsInList = true;
+                _.each( c.deps, (version, dep) => {
+                    var depInList = false;
+
+                    // check if this dep is already on the newList
+                    _.each( newList, (setComponent) => {
+                        if( setComponent.name === dep ) {
+                            depInList = true;
+                        }
+                    });
+
+                    if( !depInList ) {
+                        allDepsInList = false;
+                    }
+                });
+
+                if( allDepsInList ) {
+                    // push in new list
+                    if( newList.indexOf(c) == -1 ) {
+                        newList.push(c);
+                    }
+                }
+            });
+        }
+
+        this.list = newList;
+    }
+
+    initPackages() {
+        if( !this.packages ) {
+            var packages = {};
+            _.each(this.list, (c) => {
+                var p = Package.fromPath(c.path);
+                packages[p.name] = p;
+            });
+            this.packages = packages;
+        }
+    }
+
+    // return package from name
+    getPackage(name) {
+        this.initPackages();
+        return this.packages[name];
+    }
+
+    // return object name -> Package
+    getPackages() {
+        this.initPackages();
+        return this.packages;
+    }
+
+    // return array of packages in a dependency friendly order
+    getPackagesInDependencyOrder() {
+        var packages = [];
+        _.each(this.list, (c) => {
+            packages.push(Package.fromPath(c.path));
+        });
+        return packages;
+    }
+
+    static instance() {
+        if( Repo.__instance === null ) {
+            Repo.__instance = new Repo();
+        }
+        return Repo.__instance;
+    }
+}
+Repo.__instance = null;
+
+module.exports = {
+    "Package" : Package,
+    "Repo"    : Repo.instance()
+};

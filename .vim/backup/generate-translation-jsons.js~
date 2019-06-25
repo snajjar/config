@@ -1,0 +1,43 @@
+#!/usr/bin/node
+
+/*******************************************************************************
+ * Parse all .html files and extract translation strings into i18n json files
+ ******************************************************************************/
+
+var fs = require('fs-extra');
+var path = require('path');
+var _ = require('lodash');
+var recursive = require('recursive-readdir');
+
+var extractLang = function(lang) {
+    var filePath = path.join(process.cwd(), "..", "app", "i18n", lang+ ".i18n.json");
+
+    var d = fs.existsSync(filePath) ? require(filePath) : {};
+
+    // recurse on .html files to extract translations keys
+    var webAppPath = path.join(process.cwd(), "..", "app", "client");
+    recursive(webAppPath, ["*.css", "*.js", "*.temp", "*.tmp", "*.orig"], function (err, files) {
+        _.each( files, (file) => {
+            console.log('[*] parsing ' + file);
+            var sourceCode = fs.readFileSync(file, "utf8");
+            extractTranslationStrings(file, sourceCode, d);
+        });
+
+        // write down to file the dictionary
+        console.log("writing: " + JSON.stringify(d, null, 2));
+        fs.writeFileSync( filePath, JSON.stringify(d, null, 2) );
+    });
+}
+
+// Extract all translations strings from sourcecode into dictionary d
+var extractTranslationStrings = function( file, sourceCode, d ) {
+    var r = new RegExp('\{\{_\\s+\'([^\']*)\'\\s*\}\}');
+
+    while( (m=r.exec(sourceCode)) !== null ) {
+        console.log("Matched: " + m[1]);
+        var key = m[1];
+        d[key] = d[key] ? d[key] : key;
+    }
+}
+
+extractLang("fr");

@@ -1,0 +1,103 @@
+Template.InvoicePage.onCreated(function() {
+    this.invoiceId = this.data.invoiceId;
+
+    this.autorun(() => {
+        this.subscribe('Invoices_by_id', this.invoiceId);
+    });
+
+    this.getInvoice = function() {
+        return  Invoices.findOne(this.invoiceId);
+    };
+
+    this.getPlanPrices = function() {
+        var invoice = this.getInvoice();
+        var priceTF    = invoice.planPriceTF;
+        var tax        = round(priceTF * invoice.VAT, 2);
+        var totalPrice = round(priceTF + tax, 2);
+        return { priceTF: priceTF, tax: tax, totalPrice: totalPrice };
+    };
+
+    this.getInstanciationsPrices = function() {
+        var invoice = this.getInvoice();
+        var priceTF    = round(invoice.instanciationsNumber * invoice.instanciationUnitPriceTF, 2);
+        var tax        = round(priceTF * invoice.VAT, 2);
+        var totalPrice = round(priceTF + tax, 2);
+        return { priceTF: priceTF, tax: tax, totalPrice: totalPrice };
+    };
+
+    this.getTotalPrices = function() {
+        var invoice    = this.getInvoice();
+        var planPrices = this.getPlanPrices();
+        var instPrices = this.getInstanciationsPrices();
+
+        var priceTF    = round(planPrices.priceTF + instPrices.priceTF, 2);
+        var tax        = round( priceTF * invoice.VAT, 2);
+        var totalPrice = round( priceTF + tax, 2);
+        return { priceTF: priceTF, tax: tax, totalPrice: totalPrice };
+    };
+});
+
+Template.InvoicePage.helpers({
+    getInvoice : function() {
+        var t = Template.instance();
+        return Invoices.findOne(t.invoiceId);
+    },
+
+    getTaxPercentage : function() {
+        return this.VAT * 100;
+    },
+
+    getPlanPriceTF : function() {
+        return Template.instance().getPlanPrices().priceTF;
+    },
+
+    getPlanTax : function() {
+        return Template.instance().getPlanPrices().tax;
+    },
+
+    getPlanTotalPrice : function() {
+        return Template.instance().getPlanPrices().totalPrice;
+    },
+
+    getInstanciationsPriceTF : function() {
+        return Template.instance().getInstanciationsPrices().priceTF;
+    },
+
+    getInstanciationsTax : function() {
+        return Template.instance().getInstanciationsPrices().priceTF;
+    },
+
+    getInstanciationsTotalPrice : function() {
+        return Template.instance().getInstanciationsPrices().totalPrice;
+    },
+
+    getTotalPriceTF : function() {
+        return Template.instance().getTotalPrices().priceTF;
+    },
+
+    getTotalTax : function() {
+        return this.VATPolicy=="fr" ? Template.instance().getTotalPrices().tax : 0;
+    },
+
+    getTotalPrice : function() {
+        return this.VATPolicy=="fr" ?
+            Template.instance().getTotalPrices().totalPrice:
+            Template.instance().getTotalPrices().priceTF;
+    },
+
+    applyVAT : function() {
+        return this.VATPolicy == "fr";
+    },
+
+    isFrenchVATPolicy : function() {
+        return this.VATPolicy == "fr";
+    },
+
+    isEUVATPolicy : function() {
+        return this.VATPolicy == "eu";
+    },
+
+    getPaymentDate : function() {
+        return moment(this.date).add(2, 'weeks').format('DD/MM/YYYY');
+    },
+});

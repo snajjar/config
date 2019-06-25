@@ -1,0 +1,34 @@
+Xft.dpi: 96 
+Xft.autohint: 0
+Xft.lcdfilter: lcddefault
+Xft.hintstyle: hintfull
+Xft.hinting: 1
+Xft.antialias: 1
+Xft.rgba: rgba
+
+XTerm*locale: true
+XTerm*reverseVideo: on
+xterm*font: terminus-18
+xterm*faceName: xft:monospace:pixelsize=17
+xTerm*selectToClipboard: true
+
+Xcursor.theme: Vanilla-DMZ-AA
+Xcursor.size: 64
+
+
+! Set up scrollbars - get them, get them on the right side, and be
+! able to scroll them with the right,left, or middle mouse button
+xterm*ScrollBar: on
+*XTerm*scrollBar: true
+xterm*rightScrollBar: true
+xterm*multiScroll: on
+xterm*jumpScroll: on
+
+xterm*scrollbar.Translations: #override \n\
+  :StartScroll(Continous) MoveThumb() NotifyThumb()\n\
+  :MoveThumb() NotifyThumb() \n\
+  :StartScroll(Continous) MoveThumb() NotifyThumb()\n\
+  :MoveThumb() NotifyThumb() \n\
+  :StartScroll(Continous) MoveThumb() NotifyThumb()\n\
+  :MoveThumb() NotifyThumb() \n\
+  :NotifyScroll(Proportional) EndScroll()

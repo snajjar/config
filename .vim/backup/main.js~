@@ -1,0 +1,94 @@
+// jquery, bs, moment
+import $ from 'jquery';
+import 'bootstrap';
+import moment from 'moment';
+
+// swal
+import 'sweetalert2/dist/sweetalert2.min.js';
+import swal from 'sweetalert2'
+
+import './main.html';
+import './main.css';
+
+Meteor.startup(() => {
+    console.log('Meteor startup!');
+    $('[data-toggle="tooltip"]').tooltip();
+    $('[data-toggle="popover"]').popover();
+});
+
+// return the root url without the last '/'
+Template.registerHelper("rooturl", function() {
+    return Meteor.absoluteUrl().slice(0,-1);
+});
+
+// return the root url without the last '/'
+Template.registerHelper("debug", function() {
+    console.log('debug helper called !');
+    return "debug";
+});
+
+// check if all subscriptions are ready
+Template.registerHelper("ready", function() {
+    return subMgr.ready();
+});
+
+// check if user is admin
+Template.registerHelper("isAdmin", function() {
+    return isAdmin();
+});
+
+// return a humain-readable string for a file size
+Template.registerHelper("getReadableFileSize", function(fileSizeInBytes) {
+    if( fileSizeInBytes == 0 ) {
+        return '0 kB';
+    }
+
+    var i = -1;
+    var byteUnits = [' kB', ' MB', ' GB', ' TB', 'PB', 'EB', 'ZB', 'YB'];
+    do {
+        fileSizeInBytes = fileSizeInBytes / 1024;
+        i++;
+    } while (fileSizeInBytes > 1024);
+
+    return Math.max(fileSizeInBytes, 0.01).toFixed(2) + byteUnits[i];
+});
+
+// arr isEmpty
+Template.registerHelper("isEmpty", function( arr ) {
+    if( arr === undefined) {
+        console.error("isEmpty: testing a parameter that is undefined");
+    }
+    return arr.length == 0;
+});
+
+// truncate a string
+Template.registerHelper("trunc", function( str, size ) {
+    return str.trunc(size);
+});
+
+// date format
+Template.registerHelper("dateFormat", function(date, format) {
+    if( date === undefined ) {
+        return "";
+    }
+    if(format === "calendar" ) {
+        return moment(date).calendar();
+    }
+    else {
+        return moment(date).format(format);
+    }
+});
+
+// shortcut for a counter
+Template.registerHelper("getCount", function(counterName) {
+    return Counter.get(counterName);
+});
+
+Template.registerHelper("getUserEmail", function(counterName) {
+    if( Meteor.user() ) {
+        return Meteor.user().emails[0].address;
+    }
+    else {
+        return "<not logged in>";
+    }
+});

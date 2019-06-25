@@ -1,0 +1,143 @@
+<template name="DashboardPage">
+    <div class="page bg-white">
+        <h1 class="page-header">Dashboard</h1>
+
+        <div class="row">
+            <div class="col-lg-3">
+                <div class="card border-blue">
+                    <div class="card-header bg-blue">
+                        <a class="nohover" title="DualBox apps" href="{{rooturl}}/apps">
+                            <div class="row">
+                                <div class="col-xs-3 ml-2">
+                                    <img src="{{rooturl}}/img/ressources/Apps_Big_Icon.png" alt="DualBox Apps">
+                                </div>
+                                <div class="col-xs-9 ml-auto mr-2 text-right text-white">
+                                    <div class="huge">{{getCount "user_Apps"}}</div>
+                                    <div>Total Apps</div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="card-body" style="padding: 10px;">
+                        <a href="{{rooturl}}/apps" class="text-blue">
+                            <span class="pull-left">View all apps</span>
+                            <span class="pull-right"><i class="fa fa-arrow-circle-right"></i></span>
+                            <div class="clearfix"></div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3">
+                <div class="card border-green">
+                    <div class="card-header bg-green">
+                        <a class="nohover" title="DualBox instanciations" href="{{rooturl}}/instanciations">
+                            <div class="row">
+                                <div class="col-xs-3 ml-2">
+                                    <img src="{{rooturl}}/img/ressources/DeployedApps_Big_Icon.png" alt="DualBox Apps deployed">
+                                </div>
+                                <div class="col-xs-9 ml-auto mr-2 text-right text-white">
+                                    <div class="huge">{{getMonthInstancationsCount}}</div>
+                                    <div>Inst. <small>(this month)</small></div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="card-body" style="padding: 10px;">
+                        <a href="{{rooturl}}/instanciations" class="text-green">
+                            <span class="pull-left">View instanciations</span>
+                            <span class="pull-right"><i class="fa fa-arrow-circle-right"></i></span>
+                            <div class="clearfix"></div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3">
+                <div class="card border-orange">
+                    <div class="card-header bg-orange">
+                        <a class="nohover" title="DualBox builds" href="{{rooturl}}/builds">
+                            <div class="row">
+                                <div class="col-xs-3 ml-2">
+                                    <img src="{{rooturl}}/img/ressources/BuildingApps_Big_Icon.png" alt="DualBox Build">
+                                </div>
+                                <div class="col-xs-9 ml-auto mr-2 text-right text-white">
+                                    <div class="huge">{{getNbAppsBuilding}}</div>
+                                    <div>Apps building</div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="card-body" style="padding: 10px;">
+                        <a href="{{rooturl}}/builds" class="text-orange">
+                            <span class="pull-left">View all builds</span>
+                            <span class="pull-right"><i class="fa fa-arrow-circle-right"></i></span>
+                            <div class="clearfix"></div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3">
+                <div class="card border-red">
+                    <div class="card-header bg-red">
+                        <a class="nohover" title="DualBox drive" href="{{rooturl}}/drive">
+                            <div class="row">
+                                <div class="col-xs-3 ml-2">
+                                    <i class="fa fa-upload fa-4x text-white"></i>
+                                </div>
+                                <!-- Find a way to show number of files or disk space -->
+                                <div class="col-xs-9 ml-auto mr-2 text-right text-white">
+                                    <div class="huge">&nbsp;</div>
+                                    <div>&nbsp;</div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="card-body" style="padding: 10px;">
+                        <a href="{{rooturl}}/drive" class="text-red">
+                            <span class="pull-left">Go to drive</span>
+                            <span class="pull-right"><i class="fa fa-arrow-circle-right"></i></span>
+                            <div class="clearfix"></div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                {{> InstanciationsChart}}
+            </div>
+
+            <div class="col-lg-4">
+                {{> NotificationsCard }}
+            </div>
+        </div>
+    </div>
+</template>
+
+<template name="NotificationsCard">
+    <div class="card">
+        <div class="card-header bg-grey">
+            <i class="fa fa-bell fa-fw"></i> Notifications
+        </div>
+        <div class="card-body">
+            {{#with notifications}}
+                {{#if this.count}}
+                    <div class="list-group">
+                        {{#each this}}
+                        <a href="{{getLink}}" class="notif list-group-item">
+                            {{{getHTML}}}
+                            <span class="pull-right text-muted small"><em>{{getDate}}</em></span>
+                        </a>
+                        {{/each}}
+                    </div>
+                    <a href="#" class="btn btn-default btn-block mt-2">View all notifications</a>
+                {{else}}
+                    <p style="text-align: center;">You have no notifications yet.</p>
+                {{/if}}
+            {{/with}}
+        </div>
+    </div>
+</template>

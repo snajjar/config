@@ -1,0 +1,118 @@
+<template name="InvoicePage">
+    {{#if Template.subscriptionsReady}}
+        <page size="A4" class="mt-4" style="position: relative; padding: 5mm;">
+            <div style="border: 1px solid grey; padding: 5mm; height: 100%;">
+                {{#with getInvoice}}
+                    <div class="row">
+                        <div class="col">
+                            <div class="vendor-address">
+                                <b>Dioxygen Software</b><br/>
+                                <span>4, rue Lhomond</span><br/>
+                                <span>75005 Paris</span><br/>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col">
+                            <div class="customer-address pull-right">
+                                <u>Facture adressée à:</u><br/>
+                                <b>{{billingAddress.dest}}</b><br/>
+                                <span>{{billingAddress.line1}}</span><br/>
+                                {{#if billingAddress.line2}}<span>{{billingAddress.line2}}</span><br/>{{/if}}
+                                <span>{{billingAddress.zipcode}} {{billingAddress.city}} {{billingAddress.country}}</span>
+                                {{#if billingAddress.phone}}<br/><span>{{billingAddress.phone}}</span><br/>{{/if}}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col">
+                            <div>
+                                <b>Facture N°: {{getInvoiceNumber}}</b><br/>
+                                <b>Date : {{dateFormat date "DD/MM/YYYY"}}</b><br/>
+                            </div>
+                        </div>
+                    </div>
+
+                    <table class="table table-striped mt-5" style="width: 100%; border: 1px solid rgba(0,0,0,0.2)!important; font-size: 12px;">
+                        <thead style="text-align: center;">
+                            <tr>
+                                <th>Article</th>
+                                <th>Quantité</th>
+                                <th>Prix unitaire</th>
+                                <th>Prix HT</th>
+                                {{#if applyVAT}}
+                                    <th>% TVA</th>
+                                    <th>TVA</th>
+                                {{/if}}
+                                <th>Prix total</th>
+                            </tr>
+                        </thead>
+                        <tbody style="text-align: right;">
+                            <tr>
+                                <td>plan "{{plan}}"</td>
+                                <td>1</td>
+                                <td>{{planPriceTF}} €</td>
+                                <td>{{planPriceTF}} €</td>
+                                {{#if applyVAT}}
+                                <td>{{getTaxPercentage}}%</td>
+                                <td></td>
+                                {{/if}}
+                                <td></td>
+                            </tr>
+
+                            <tr>
+                                <td>Instances d'application</td>
+                                <td>{{instanciationsNumber}}</td>
+                                <td>{{instanciationUnitPriceTF}} €</td>
+                                <td>{{getInstanciationsPriceTF}} €</td>
+                                {{#if applyVAT}}
+                                <td>{{getTaxPercentage}}%</td>
+                                <td></td>
+                                {{/if}}
+                                <td></td>
+                            </tr>
+
+                            <tr style="border-top: 2px solid rgba(0,0,0,0.2);">
+                                <td>Total</td>
+                                <td></td>
+                                <td></td>
+                                <td>{{getTotalPriceTF}} €</td>
+                                <td></td>
+                                <td>{{getTotalTax}} €</td>
+                                <td><b>{{getTotalPrice}} €</b></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="row mt-3">
+                        <div class="col">
+                            {{#if VATIntracomm}}<p class="mt-3" style="text-align: right; margin-bottom: 0;">Numéro de TVA: {{VATIntracomm}}</p>{{/if}}
+                            {{#unless isFrenchVATPolicy}}
+                                {{#if isEUVATPolicy}}
+                                <p style="text-align: right;"><b>TVA non applicable: Autoliquidation.</b></p>
+                                {{else}}
+                                <p style="text-align: right;"><b>TVA non applicable: art. 259-1 du CGI.</b></p>
+                                {{/if}}
+                            {{/unless}}
+                        </div>
+                    </div>
+
+                    <div class="row mt-3">
+                        <div class="col">
+                            <p style="font-size: 12px;">En votre aimable règlement par chèque ou virement au {{getPaymentDate}}.</p>
+                            <p style="font-size: 12px;"><i>Escompte pour paiement anticipé: néant.</i></p>
+
+                            <p class="mt-5" style="font-size: 12px;"><i>En application de la loi n° 92.1442 du 31 décembre 1992, toute somme non payée à l'échéance légale prévue donne lieu, sans mise en demeure préalable, au paiement d'intérêts de pénalités de retard au taux de 2,00 %. Indemnité forfaitaire de 40€ pour frais de recouvrement en cas de retard de paiement.</i></p>
+                        </div>
+                    </div>
+
+                    <p style="position: absolute; left: 0; right: 0; bottom: 0; margin: 15mm; width: calc(100% - 30mm); text-align: center; font-size: 10px; line-height: 10px;"><i>SAS au capital de 2000€ - Code NAF 5829C – Siret 829 482 868 00017 RCS PARIS TVA intra FR 43 829482868<br/>Banque : CIC – IBAN FR76 3008 7330 0100 0205 6560 162</i></p>
+                {{/with}}
+            </div>
+        </page>
+    {{else}}
+        {{> Loading }}
+    {{/if}}
+</template>

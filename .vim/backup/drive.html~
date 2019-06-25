@@ -1,0 +1,261 @@
+
+
+<template name="UploadBar">
+    {{#if uploading}}
+    <div class="upload-bar" style="text-align: right">
+        <span class="upload-current-label" >{{fileName}}: </span>
+        {{#if failed}}
+        <div style="display: inline-block; background-color: white; width: 120px; height: 20px;">
+            <div style="width: 100%; background-color: red;" class="progress-bar" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" >
+                <span>Failed</span>
+            </div>
+        </div>
+        <button class="btn btn-small btn-restart" style="margin-left: 10px; margin-right: 10px; padding-top: 0px; padding-bottom: 0px; vertical-align: top; background-color: transparent;"><i class="fa fa-refresh" aria-hidden="true"></i></button>
+        {{else}}
+            {{#if aborted}}
+            <div style="display: inline-block; background-color: white; width: 120px; height: 20px;">
+                <div style="width: 100%; background-color: orange;" class="progress-bar" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" >
+                    <span>Aborted</span>
+                </div>
+            </div>
+            <button class="btn btn-small btn-restart" style="margin-left: 10px; margin-right: 10px; padding-top: 0px; padding-bottom: 0px; vertical-align: top; background-color: transparent;"><i class="fa fa-refresh" aria-hidden="true"></i></button>
+            {{else}}
+            <div style="display: inline-block; background-color: white; width: 120px; height: 20px;">
+                <div style="width: {{progress}}%;" class="progress-bar" role="progressbar" aria-valuenow="{{progress}}" aria-valuemin="0" aria-valuemax="100" >
+                    <span>{{progress}}% Complete</span>
+                </div>
+            </div>
+            <button class="btn btn-small btn-cancel" style="margin-left: 10px; margin-right: 10px; padding-top: 0px; padding-bottom: 0px; vertical-align: top; background-color: transparent;"><i class="fa fa-times" aria-hidden="true"></i></button>
+            {{/if}}
+        {{/if}}
+    </div>
+    {{/if}}
+</template>
+
+<template name="UploadWindow">
+    <div class="upload-status" style="position: absolute; bottom: 0; right: 0; margin: auto;text-align: center;">
+        {{#if uploadNow}}
+            <div class="upload-now">
+                <div style="margin-bottom: 10px; text-align: left;">
+                    <b style="display: inline-block;">Uploading {{nbUploaders}} files</b>
+                    <button class="btn btn-small pull-right btn-collapse-uploads"><i class="glyphicon glyphicon-minus"></i></button>
+                </div>
+                <div class="upload-list {{hide}}">
+                    {{#each uploaders}}
+                        {{> UploadBar }}
+                    {{/each}}
+                </div>
+            </div>
+        {{/if}}
+    </div>
+</template>
+
+<template name="DriveFileImage">
+    <div style="width: 80px; height: 80px; position: relative;">
+        <img class="noselect" src="/img/file-format.png" style="width: 100%; height: 100%;" draggable="false" />
+        <span style="color: white; position: absolute; width: auto; top: 32px; left: 0; right: 0; margin: 0px auto; font-size: 18px; display: block; text-align: center;">{{{iconHTML}}}</span>
+    </div>
+</template>
+
+<template name="DriveFile">
+    {{#if isFile}}
+    <div class="drivefile" data-index="{{index}}" draggable="true">
+        <div class="drivefile-image noselect">
+            <div style="position: relative; left: -5px;">
+                {{> DriveFileImage}}
+            </div>
+        </div>
+        <div class="drivefile-name noselect">
+            {{name}}
+        </div>
+    </div>
+    {{else}}
+    <div class="drivefile drivedir" data-index="{{index}}" draggable="true" data-name="{{name}}">
+        <div class="drivefile-image">
+        <div style="width: 80px; height: 80px; position: relative;">
+            <img class="noselect" src="/img/folder.png" style="width: 100%" draggable="false"/>
+            <span style="color: black; position: absolute; width: 20px; top: 30px; left: 0; right: 0; margin: 0px auto; font-size: 20px; display: block;">{{{iconHTML}}}</span>
+            <div class="drivedrop">
+                <i class="fa fa-plus-circle" aria-hidden="true"></i>
+            </div>
+        </div>
+        </div>
+        <div class="drivefile-name noselect">
+            {{name}}
+        </div>
+    </div>
+    {{/if}}
+</template>
+
+<template name="GeneralFileInfos">
+    <div class="general-file-infos">
+        <div>
+            <label>file: </label>
+            <span>{{name}}</span>
+        </div>
+        <div>
+            <label>ext: </label>
+            <span>{{ext.toUpperCase}}</span>
+        </div>
+        <div>
+            <label>size: </label>
+            <span>{{getReadableFileSize Size}}</span>
+        </div>
+        <div>
+            <label>changed: </label>
+            <span>{{dateFormat LastModified 'lll'}}</span>
+        </div>
+    </div>
+</template>
+
+<template name="FileDetailsDisplay">
+    <div style="text-align: center; margin-bottom: 20px; margin-top: 20px;">
+        {{#if isDir}}
+            <div class="drivefile drivedir" data-index="{{index}}" data-name="{{name}}">
+                <div class="drivefile-image">
+                <div style="width: 80px; height: 80px; position: relative;">
+                    <img class="noselect" src="/img/folder.png" style="width: 100%" draggable="false"/>
+                    <span style="color: black; position: absolute; width: 20px; top: 30px; left: 0; right: 0; margin: 0px auto; font-size: 20px; display: block;">{{{iconHTML}}}</span>
+                </div>
+                </div>
+                <div class="drivefile-name noselect">
+                    {{name}}
+                </div>
+            </div>
+
+            <div class="file-actions">
+                <button class="btn btn-danger btn-delete-file" data-path="{{path}}"><i class="glyphicon glyphicon-minus"></i> Delete folder</button>
+            </div>
+        {{else}}
+            {{#if isImg}}
+                <img src="{{getFileUrl}}" style="width: 100%; padding: 20px;"/>
+            {{else}}
+                <div class="drivefile nodir" data-index="{{index}}">
+                    <div class="drivefile-image noselect">
+                        <div style="position: relative; left: -5px;">
+                            {{> DriveFileImage}}
+                        </div>
+                    </div>
+                    <div class="drivefile-name noselect">
+                        {{name}}
+                    </div>
+                </div>
+            {{/if}}
+
+            <div class="file-infos">
+                {{> GeneralFileInfos }}
+            </div>
+
+            <div class="file-actions">
+                <button class="btn showLink"><img src="/img/link.svg" style="width: 20px; height: 20px;"/> Show File link</button>
+                <a class="btn btn-success" href="{{getFileUrl}}" target="_blank"><i class="fa fa-download" aria-hidden="true"></i> Download</a>
+                <button class="btn btn-danger btn-delete-file" data-path="{{path}}"><i class="glyphicon glyphicon-minus"></i> delete file</button>
+            </div>
+        {{/if}}
+    </div>
+</template>
+
+<template name="DetailsPanel">
+    <div class="file-details">
+        {{#with getSelectedFile}}
+            {{> FileDetailsDisplay }}
+        {{/with}}
+    </div>
+</template>
+
+<template name="DriveFoldersView">
+    <div class="drive-container {{reduced}}">
+        <div class="noselect">
+            {{#each getObjects}}
+                {{> DriveFile}}
+            {{/each}}
+        </div>
+
+        <div style="position: absolute; left: 0; bottom: 0; right: 0; margin: 0px auto; text-align: center;">
+            {{#if getStatus}}
+                <div style="width: 20px; height: 20px; display:inline-block; position: relative;">
+                    {{> Loading}}
+                </div>
+                <span style="display: inline-block; height: 20px; line-height: 20px; vertical-align: top; font-size: 14px;"><i>{{getStatus}}</i></span>
+            {{else}}
+                <i class="no-upload-now noselect" style="color: grey;">Drag & drop to upload</i>
+            {{/if}}
+        </div>
+    </div>
+
+    {{> UploadWindow }}
+</template>
+
+<template name="Drive">
+    <div class="container-fluid container-full">
+        <nav class="navbar navbar-expand-md navbar-dark bg-white">
+            <div class="navbar-collapse collapse w-100 order-1 order-md-0 dual-collapse2">
+                <ul class="navbar-nav mr-auto">
+                    <li class="nav-item active">
+                        <button class="btn btn-transparent btn-lg link-to-dashboard" style="font-size: 24px;">
+                            <i class="fa fa-arrow-circle-left"></i>
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <nav aria-label="breadcrumb" style="margin: 5px;">
+                            <ol class="breadcrumb bg-white" style="padding: 3px; margin-bottom: 0px; vertical-align: bottom;">
+                                <li class="breadcrumb-item">
+                                    <h1 style="margin: 0px; font-size: 22px;">
+                                        <b><a class="gotopath" href="/" title="Go to drive root">Drive</a></b>
+                                    </h1>
+                                </li>
+                                {{#each pathFolders}}
+                                <li class="breadcrumb-item" style="line-height: 30px; font-size: 18px;">
+                                    <a class="gotopath" href="{{path}}" title="Go to {{name}}">{{name}}</a>
+                                </li>
+                                {{/each}}
+                            </ol>
+                        </nav>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="mx-auto order-0">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item">
+                        <div class="drive-search" style="max-width: 300px;">
+                            <input type="text" class="form-control input-xs" placeholder="Search in this folder" />
+                            <i class="fa fa-search"></i>
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <div class="drive-sort form-group" title="sort files" style="margin-bottom: 0;">
+                            <select class="form-control input-xs" name="drive-sort" style="height: auto; line-height: 14px; font-size: 14px; min-width: 100px;">
+                                <option value="name-asc" selected><b>&#9650;</b> name</option>
+                                <option value="name-desc"><b>&#9660;</b> name</option>
+                                <option value="date-asc"><b>&#9650;</b> date</option>
+                                <option value="date-desc"><b>&#9660;</b> date</option>
+                                <option value="size-asc"><b>&#9650;</b> size</option>
+                                <option value="size-desc"><b>&#9660;</b> size</option>
+                            </select>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="navbar-collapse collapse w-100 order-3 dual-collapse2">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item">
+                        <button class="btn btn-primary btn-create-folder" style="padding-left: 6px; padding-right: 6px;">
+                            <i class="fa fa-folder-open"></i><b> &nbsp;New Folder</b>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+        <hr class="m-0"/>
+
+        {{> DriveFoldersView }}
+
+        {{#if hasSelectedFile}}
+            {{> DetailsPanel }}
+        {{/if}}
+    </div>
+</template>
+
+

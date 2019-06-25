@@ -1,0 +1,128 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var urlParse = require('url-parse');
+var http = require('http');
+var https = require('https');
+
+/**
+ *  A simple HttpLoadFile module for DualBox.
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var HttpLoadFile = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.request = null;
+};
+HttpLoadFile.prototype = Object.create(DualBox.Module.prototype);
+HttpLoadFile.prototype.constructor = HttpLoadFile;
+
+HttpLoadFile.prototype.stop = function() {
+    if( this.request != null ) {
+        this.warn("INTERRUPTING HTTP REQUEST");
+        this.request.abort();
+        this.request = null;
+    }
+}
+
+HttpLoadFile.prototype.storageKey = function( url ) {
+    return this.id + "_" + url;
+}
+
+HttpLoadFile.prototype.compute = function(input, response){
+    this.debug( "Computing output of HttpLoadFile" );
+
+    if( !input.url ) {
+        throw new DualBox.errors.RuntimeError('can not resolve url: ' + input.url + ', aborting http request');
+    }
+
+    var buildFileFromBufferURL = function(url, buffer){
+        var split = url.split(new RegExp("[\\/]"));
+        var filename = split[split.length-1];
+        var ext = filename.slice(filename.lastIndexOf('.')+1, filename.length);
+        var name = filename.slice(0,filename.lastIndexOf('.'));
+
+        return DualBox.File.buildFromBuffer(buffer, ext, name);
+    };
+
+    // check if have the result of this http request saved in the local Storage
+    var str = DualBox.sessionStorage.getItem( this.storageKey(input.url) );
+    if( str ) {
+        this.warn('fetching data from local storage : ' + input.url);
+        var file = buildFileFromBufferURL(
+            input.url,
+            new Buffer(str, 'binary')
+        );
+        var output = { file:file };
+        response.send(output);
+
+        return;
+    }
+    else {
+        // We need to make the http/https request
+        var url_split = urlParse(input.url);
+        var options = {
+            hostname: url_split.hostname,
+            path: url_split.pathname,
+            method: 'GET',
+            rejectUnauthorized: false,
+            contentType: 'application/octet-stream'
+        };
+
+        // find the protocol
+        if(url_split.protocol !== 'https:' && url_split.protocol !== 'http:'){
+            throw new DualBox.errors.RuntimeError("Error : the given URL is not http nor https protocol, please check : " + input.url);
+        }
+        var protocol = url_split.protocol === 'https:' ? https : http;
+
+        this.warn("loading: " + input.url);
+
+        var that = this;
+        this.request = protocol.get(options, function(res) {
+            var data = [];
+
+            // error handling (4xx and 5xx status codes)
+            if( res.statusCode - 400 >= 0 ) {
+                throw new DualBox.errors.RuntimeError("Error during HTTP request: url " + input.url + " responded with status code " + res.statusCode);
+            }
+
+            res.on('data', function(chunk) {
+                data.push(chunk);
+            }).on('end', function() {
+                //at this point data is an array of Buffers
+                //so Buffer.concat() can make us a new Buffer
+                //of all of them together
+                var buffer = Buffer.concat(data);
+
+                // save our buffer in the sessionStorage, and send the result
+                try {
+                   DualBox.sessionStorage.setItem( that.storageKey(input.url), buffer.toString('binary') );
+                }
+                catch (e) {
+                    console.warn("Exception in sessionStorage : " + e.message);
+                }
+
+                var file = buildFileFromBufferURL(
+                    input.url,
+                    buffer
+                );
+                var output = { file:file };
+                response.send(output);
+            });
+            res.on('error', function(err) {
+                throw new DualBox.errors.RuntimeError("Error during HTTP request: " + err.message);
+            });
+            res.on('aborted', function() {
+                that.warn("Request to %s has been aborted", input.url);
+            });
+        });
+
+        var self = this;
+        this.request.on('error', function(err) {
+            self.warn("caught http error: " + err);
+        });
+    }
+};
+
+module.exports = HttpLoadFile;
+

@@ -1,0 +1,256 @@
+var pjson = require('../package.json');
+var colors = require('colors');
+var shelljs = require('shelljs');
+var yargs = require('yargs');
+var request = require('request');
+var _ = require('lodash');
+var fs = require('fs');
+var path = require('path');
+
+var AppParser = require('../lib/appparser');
+var DpmCache = require('../lib/dpmcache');
+
+var getArgs = function() {
+    return yargs
+        .alias('a','app')
+        .alias('v','version')
+        .alias('i','input')
+        .alias('o','output')
+        .argv;
+}
+
+var checkInputFormat = function( input ) {
+    if( !input ) {
+        throw "No input provided";
+    }
+    if( !input.app ) {
+        throw "malformed input: 'app' not found in JSON";
+    }
+    if( !input.version ) {
+        throw "malformed input: 'version' not found in JSON";
+    }
+    if( !input.input ) {
+        throw "malformed input: 'input' not found in JSON";
+    }
+}
+
+var loadAppScript = function(app, version, cb) {
+    var url = pjson.dualboxEndpoint + "/api/app/" + app + "/v/" + version;
+    request(url, function( err, res, body ) {
+        if( err ) {
+            throw "Could not resolve application " + app + " version " + version + " on url " + url + " : " + err;
+        }
+
+        // Response here is JSON with the script location. Resolve it
+        try {
+            var json = JSON.parse(body);
+
+            request(json.Location, function(err, res, body) {
+                if( err ) {
+                    throw "Could not resolve application " + app + " version " + version + " on url " + json.Location + " : " + err;
+                }
+
+                cb(body);
+            });
+        }
+        catch(e) {
+            console.error('Could not resolve application ' + app + ' version ' + version + '.\n' +
+                'Please contact support (providing the application json to resolve).');
+        }
+    });
+}
+
+var loadAppJson = function(app, version, cb) {
+    var url = pjson.dualboxEndpoint + "/api/app/" + app + "/v/" + version + "/json";
+    request(url, function( err, res, body ) {
+        if( err ) {
+            cb( new Error("Could not resolve json for application " + app + " version " + version + " on url " + url + ": " + err) );
+        }
+        else {
+            cb( null, JSON.parse(body) );
+        }
+    });
+}
+
+// Determine the DualBox type of an object
+// return "native", "File" or "unknown" for now
+var getObjectType = function( o ) {
+    if( typeof o === "object" ) {
+        var objectType = o.constructor && o.constructor.name;
+        if( objectType ) {
+            return objectType;
+        }
+        else {
+            return "unknown";
+        }
+    }
+    else {
+        return "native";
+    }
+}
+
+var printOutput = function( output, outputDest ) {
+    if( outputDest == "stdout" ) {
+        // print to console
+        var outputFunction = function( o ) {
+            switch( getObjectType(o) ) {
+                case "native" :
+                    console.log(o);
+                    break;
+                case "File" :
+                    var b = new Buffer(o.toArrayBuffer());
+                    process.stdout.write(b);
+                    break;
+                case "unkown":
+                    console.error("Unrecognized object type for requested output");
+                    require('util').inspect(o);
+                    break;
+                default:
+                    console.error("Object type " + getObjectType(o) + " is not handled yet by spm. Please contact support");
+                    break;
+            }
+        };
+    }
+    else {
+        // write to a file
+        var outputFunction = function( o ) {
+            switch( getObjectType(o) ) {
+                case "native" :
+                    fs.writeFileSync(outputDest, o);
+                    break;
+                case "File" :
+                    fs.writeFileSync(outputDest, new Buffer(o.toArrayBuffer()), "binary");
+                    break;
+                case "unkown":
+                    console.error("Unrecognized object type for requested output");
+                    require('util').inspect(o);
+                    break;
+                    console.error("Object type " + getObjectType(o) + " is not handled yet by spm. Please contact support");
+                    break;
+            }
+        }
+    }
+
+    outputFunction(output);
+}
+
+// app: name of the app
+// version: version
+// json: the app.json file
+// parameters: all app inputs to set
+// output: the output we want to resolve on the app
+// strictVersioning: true if we want to execute the app with the exact versions of components
+var execApp = function(app, version, json, parameters, output, strictVersioning, cb) {
+    // get dependencies and install them
+    console.warn('[*] Checking app dependencies'.green);
+    var dpmCache = new DpmCache(null, app, version);
+    var appJson = strictVersioning ? json : dpmCache.toCacheVersion(json);
+    dpmCache.installApp(appJson, function(err) {
+        if(err) {
+            console.warn(('[*] ' + err).yellow);
+            cb(err, null);
+        }
+
+        // now DualBox is requirable
+        var DualBox = require('@dualbox/dualbox');
+
+        // instanciate the app
+        var app = DualBox.start({
+            "logLevel" : "error",
+            "profiler" : false,
+            "ui" : {},
+            "json" : appJson,
+            "options" : { noVersionCheck : !strictVersioning },
+        });
+
+        // set all parameters
+        _.each(parameters, function(val, key) {
+            //console.log('setting value ' + val + ' on key ' + key);
+            app.setInput(key, val);
+        });
+
+        // prepare the callback on output
+        console.warn('[*] computing output...'.green);
+        app.readOutput(output, function(res) {
+            console.warn('[*] computing done !'.green);
+            cb(null, res);
+        });
+    });
+}
+
+var handleCommand = function(args) {
+    // get and check args
+    var args = getArgs();
+
+    // load the input arg if it's a file
+    var input = args['i'];
+    if( input[0] == '@' ) {
+        if( input[1] == '/' ) {
+            input = input.substr(1);
+        }
+        else {
+            input = require(process.cwd() + '/' + input.substr(1));
+        }
+    }
+    console.log('Input: ' + input);
+    checkInputFormat(input);
+
+    // check if we forced the application or version
+    var app = args['a'] || input.app;
+    var version = args['v'] || input.version;
+    var appInputs = input.input;
+    var appOutput = args['o'];
+    var strictVersioning = args['strict-versioning'] === undefined;
+
+    // parse output to resolve app output name and destination
+    var output = args['o'];
+    if( output.indexOf(':') !== -1 ) {
+        var split = output.split(':');
+        var appOutput  = split[0];
+        var outputDest = split[1].substr(1);
+    }
+    else {
+        var appOutput  = output;
+        var outputDest = "stdout";
+    }
+
+    if( args['appfile'] ) {
+        console.warn(('[*] Reading app file ' + args['appfile']).green);
+        var jsonStr = fs.readFileSync( args['appfile'], 'utf8');
+        var json = JSON.parse(jsonStr);
+        execApp(app, version, json, appInputs, appOutput, strictVersioning, function(err, res) {
+            if( err ) {
+                return -1;
+            }
+            else {
+                printOutput(res, outputDest);
+            }
+        });
+    }
+    else {
+        console.warn(('[*] Resolving application ' + app + ' version ' + version).green);
+        loadAppJson(app, version, function(err, json) {
+            execApp(app, version, json, appInputs, appOutput, strictVersioning, function(err, res) {
+                if( err ) {
+                    return -1;
+                }
+                else {
+                    printOutput(res, outputDest);
+                }
+            });
+        });
+    }
+};
+
+exports.handle = handleCommand;
+exports.description = "Run a dualbox.io deployed application to get an output";
+exports.help =
+`
+Run a deployed application version with a set of parameters to get an output to a file:
+Application name and version are provided in the JSON input
+{0} run --input [json_parameters|@json_file] --output [output name]:@file
+
+Run a deployed application version with a set of parameters to get an output to a file while forcing the application and version:
+{0} run -a [appName] -v [version] --input [json_parameters|@json_file] --output [output name]:@file
+
+`.format(pjson.name);

@@ -1,0 +1,142 @@
+<template name="UnloggedTopBar">
+    <nav class="navbarnavbar navbar-expand-lg navbar-unlogged">
+        <div class="navbar-collapse collapse" id="collapsingNavbar">
+            <a class="navbar-brand" href="{{rooturl}}">
+                <img class="topbar-logo" title="dualbox logo" src="{{rooturl}}/img/logo/logo-dualbox-32.png" />
+            </a>
+
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item active">
+                    <a class="nav-link link-to-examples-page" href="/examples">Examples <span class="sr-only">(current)</span></a>
+                </li>
+                <li class="nav-item active">
+                    <a class="nav-link link-to-pricing-page" href="/pricing">Pricing <span class="sr-only">(current)</span></a>
+                </li>
+                <li class="nav-item active">
+                    <a class="nav-link link-to-contact-page" href="/contact">Contact <span class="sr-only">(current)</span></a>
+                </li>
+                <li class="nav-item active">
+                    <a class="nav-link" href="{{rooturl}}/login"><button class="btn btn-primary rounded">Login</button></a>
+                </li>
+            </ul>
+        </div>
+   </nav>
+</template>
+
+<template name="LoggedTopBar">
+    <nav class="navbar navbar-expand-lg navbar-unlogged">
+        <div class="navbar-collapse collapse" id="collapsingNavbar">
+            <a class="navbar-brand" href="{{rooturl}}">
+                <img class="topbar-logo" title="dualbox logo" src="{{rooturl}}/img/logo/logo-dualbox-32.png" />
+            </a>
+
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item active">
+                    <a class="btn btn-primary" href="{{rooturl}}/dashboard">
+                        <i class="fa fa-home text-white"></i>
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <button type="button" class="btn {{#if hasUnseenNotifications}}btn-danger{{else}}btn-primary{{/if}} dropdown-toggle btn-see-notifications" data-toggle="dropdown" href="#">
+                        <i class="fa fa-bell"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-alerts dropdown-menu-right" style="padding: 0;">
+                        {{#with notifications}}
+                            {{#if this.count}}
+                                {{#each notifications}}
+                                <li class="notification-li">
+                                    <a class="no-underline" href="{{getLink}}" style="display: block; padding-top: 5px; padding-bottom: 5px;">
+                                        <div style="font-size: 16px; line-height: 16px;">
+                                            {{{getHTML}}} <span class="pull-right text-muted small">{{getDate}}</span>
+                                        </div>
+                                    </a>
+                                </li>
+                                {{/each}}
+                            {{else}}
+                                <li class="notification-li">
+                                    <p style="text-align: center;">You have no notification yet</p>
+                                </li>
+                            {{/if}}
+                        {{/with}}
+                    </ul>
+                    <!-- /.dropdown-alerts -->
+                </li>
+                <li class="nav-item dropdown">
+                    <button type="button" class="btn btn-primary dropdown-toggle" data-toggle="dropdown" href="#">
+                        <i class="fa fa-user"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-user dropdown-menu-right" style="padding-left: 15px; padding-right: 15px;">
+                        <li class="text-muted">{{getUserEmail}}</li>
+                        <hr style="margin:0; padding: 0;"/>
+                        {{#if isAdmin}}
+                            <li><a href="/admin" class="text-danger"><i class="fa fa-unlock-alt fa-fw"></i> Admin</a></li>
+                            <hr style="margin:0; padding: 0;"/>
+                        {{/if}}
+                        <!--
+                        <li><a href="#"><i class="fa fa-user fa-fw"></i> User Profile</a></li>
+                        -->
+                        <li><a href="/settings"><i class="fa fa-gear fa-fw"></i> Settings</a></li>
+                        <li><a href="/billing"><i class="fa fa-usd fa-fw"></i> Billing</a></li>
+                        <li class="divider"></li>
+                        <li><a class="logout" href="#"><i class="fa fa-sign-out fa-fw"></i> Logout</a>
+                        </li>
+                    </ul>
+                    <!-- /.dropdown-user -->
+                </li>
+            </ul>
+        </div>
+   </nav>
+</template>
+
+<template name="LoggedIn">
+    {{> LoggedTopBar }}
+
+    <div class="main">
+        {{> yield }}
+    </div>
+</template>
+
+<template name="Unlogged">
+    {{> UnloggedTopBar }}
+
+    <div class="main">
+        {{> yield}}
+    </div>
+</template>
+
+<!-- Loading template, shows a spinner. The template parameter "fontSize" can be used to change the size -->
+<template name="Loading">
+    <div class="mx-auto" style="height: 100%; text-align: center; vertical-align: middle;">
+        <i class="fa fa-spinner fa-spin text-muted" style="line-height: 100vh; font-size: {{fontSize}};"></i>
+    </div>
+</template>
+
+<template name="Refreshing">
+    <i class="fa fa-refresh fa-spin"></i>
+</template>
+
+<template name="Template404">
+    <p class="mx-auto" style="font-size: 52px; color: red; text-align: center; margin-top: 200px;">404</p>
+    <p class="mx-auto" style="text-align: center;">{{message}}</p>
+</template>
+
+<template name="Template403">
+    <p class="mx-auto" style="font-size: 52px; color: red; text-align: center; margin-top: 200px;">403</p>
+    <p class="mx-auto" style="text-align: center;">Unauthorized access</p>
+</template>
+
+<template name="DisplayError">
+    <p class="d-block mx-auto text-danger" style="width: 400px; margin-top: 250px;">{{error}}</p>
+</template>
+
+<!-- User validation templates -->
+<template name="UserEmailNotVerifiedPage">
+    <p class="d-block mx-auto" style="width: 400px; margin-top: 250px;">An email has been sent to confirm your email address.<br/>Please confirm your email address to continue.</p>
+
+    <p class="d-block mx-auto mt-4 resend-email-text" style="width: 400px;"><small>Can't find it? Check the spam folder or <a class="resend-email" href="#">click here to resend the email</a>.</small></p>
+</template>
+
+<!-- User validation templates -->
+<template name="UserNotValidatedPage">
+    <p class="d-block mx-auto" style="width: 600px; margin-top: 250px;">Sorry, Dualbox is still in closed beta. Accounts require manual validation.<br/><br/>If you want to activate your account, please send an email to contact@dualbox.com.</p>
+</template>

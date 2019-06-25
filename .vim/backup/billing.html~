@@ -1,0 +1,141 @@
+<template name="BillingPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">
+            <button class="btn btn-lg btn-transparent link-to-dashboard" style="font-size: 24px;">
+                <i class="fa fa-arrow-circle-left"></i>
+            </button>
+            <span>Billing</span>
+        </h1>
+
+        {{#if hasInvoices}}
+            {{#if has2Invoices}}
+            <div class="row">
+                <div class="col">
+                    <div class="card">
+                        <div class="card-header">Usage Recap</div>
+                        <div class="card-body">
+                            {{> InvoicesBarChart }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {{/if}}
+
+            <div class="row mt-3">
+                <div class="col">
+                    <div class="card">
+                        <div class="card-header">Monthly Bill</div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <select class="form-control select-month">
+                                        {{#each getInvoices}}
+                                        <option value="{{_id}}">{{dateFormat getInvoiceDate "MMMM YYYY"}}</option>
+                                        {{/each}}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {{#with getSelectedInvoice}}
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="card mt-3">
+                                        <div class="card-header">Print the Invoice</div>
+                                        <div class="card-body">
+                                            <a title="Invoice for {{getMonthString}}" target="_blank" href="{{getLink}}">View invoice</a>
+                                        </div>
+                                    </div>
+
+                                    {{#if hasAdvancedLogging}}
+                                    <div class="card mt-3">
+                                        <div class="card-header">Usage by apps</div>
+                                        <div class="card-body">
+                                            {{> InstanciationsPieChart}}
+                                        </div>
+                                    </div>
+                                    {{/if}}
+                                </div>
+
+                                <div class="col-md-8">
+                                    <div class="card mt-3">
+                                        <div class="card-header">Summary</div>
+                                        <div class="card-body" style="padding: 0px;">
+                                            <table class="table table-striped" style="width: 100%; text-align: right; margin: 0px;">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Article</th>
+                                                        <th>Qty</th>
+                                                        <th>Price</th>
+                                                        <th>VAT</th>
+                                                        <th>Total price</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td>{{plan}} plan</td>
+                                                        <td>1</td>
+                                                        <td>{{prices.pricePlanTF}} €</td>
+                                                        <td></td>
+                                                        <td></td>
+                                                    </tr>
+
+                                                    <tr>
+                                                        <td>Application Instanciation</td>
+                                                        <td>{{instanciationsNumber}}</td>
+                                                        <td>{{prices.priceInstanciationsTF}} €</td>
+                                                        <td></td>
+                                                        <td></td>
+                                                    </tr>
+
+                                                    <tr style="border-top: 2px solid rgba(0,0,0,0.2);">
+                                                        <td>Total</td>
+                                                        <td></td>
+                                                        <td>{{prices.priceTF}} €</td>
+                                                        <td>{{prices.priceVAT}} €</td>
+                                                        <td>{{prices.price}} €</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {{#if hasAdvancedLogging}}
+                                    <div class="card mt-3">
+                                        <div class="card-header">Instanciations details</div>
+                                        <div class="card-body" style="padding: 0px;">
+                                            <table class="table table-striped" style="width: 100%; text-align: left; margin: 0px;">
+                                                <thead style="text-align: center;">
+                                                    <tr>
+                                                        <th>App</th>
+                                                        <th>Version</th>
+                                                        <th>Count</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody style="text-align: center;">
+                                                    {{#each getInstanciations}}
+                                                    <tr>
+                                                        <td>{{appName}}</td>
+                                                        <td>{{appVersion}}</td>
+                                                        <td>{{count}}</td>
+                                                    </tr>
+                                                    {{/each}}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    {{/if}}
+
+                                </div>
+                            </div>
+                            {{/with}}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {{else}}
+            <p class="mt-2">You have no invoices yet.</p>
+        {{/if}}
+    </div>
+</template>
+
+

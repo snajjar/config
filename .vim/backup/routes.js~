@@ -1,0 +1,298 @@
+import { Router } from 'meteor/iron:router';
+
+/**
+ *   Meteor routing
+ */
+
+Router.configureBodyParsers = function () {
+    this.onBeforeAction(Iron.Router.bodyParser.json({limit: '100mb'}));
+};
+
+Router.configure({
+    layoutTemplate: 'LoggedIn',
+    loadingTemplate: 'Loading'
+});
+
+// Filter for a user to use the logged part of Dualbox
+var userFilter = function() {
+    var user = Meteor.user();
+    if( !user ) {
+        if( Meteor.loggingIn() ) {
+            this.render('Loading');
+        }
+        else {
+            this.render('LoginPage');
+        }
+    }
+    else {
+        if( !user.emailVerified() ) {
+            this.render('UserEmailNotVerifiedPage');
+        }
+        else if( !user.isValidated() ) {
+            this.render('UserNotValidatedPage');
+        }
+        else {
+            this.next();
+        }
+    }
+}
+
+// Filter for the admin part
+var adminFilter = function() {
+    var userId = Meteor.userId();
+    if( !userId ) {
+        if( Meteor.loggingIn() ) {
+            this.render('Loading');
+        }
+        else {
+            this.render('LoginPage');
+        }
+    }
+    else if( !isAdmin(userId) ) {
+        this.render('Template403');
+    }
+    else {
+        this.next();
+    }
+}
+
+///////////////////////////////////////////////////////
+//  Front-end routes (when unlogged)
+//
+
+Router.route('/', function() {
+    if( Meteor.userId() ) {
+        this.redirect('/dashboard');
+    }
+    else {
+        this.layout('Unlogged');
+        this.render('LandingPage');
+    }
+});
+
+Router.route('LoginPage', {
+    path: '/login',
+    template: 'LoginPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('RecoverPasswordPage', {
+    path: '/recover',
+    template: 'RecoverPasswordPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('RegisterPage', {
+    path: '/register',
+    template: 'RegisterPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('ContactPage', {
+    path: '/contact',
+    template: 'ContactPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('PricingPage', {
+    path: '/pricing',
+    template: 'PricingPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('ExamplesPage', {
+    path: '/examples',
+    template: 'ExamplesPage',
+    layoutTemplate: 'Unlogged',
+}, { 'where' : 'client' });
+
+Router.route('ApplicationPhasePage', {
+    path: '/apps/:_appName/:_appPhase',
+    template: 'ApplicationPhasePage',
+    layoutTemplate: '',
+    data: function() {
+        return {
+            "appName" : this.params._appName,
+            "appPhase" : this.params._appPhase
+        }
+    }
+});
+
+
+///////////////////////////////////////////////////////
+//  Account specific routes
+//
+Router.route('ConfirmEmailLink', {
+    path: '/confirmEmail/:token',
+    action: function() {
+        console.log('Verifying email !');
+        Accounts.verifyEmail(this.params.token, (err) => {
+            if( err ) {
+                if( err.reason == "Verify email link expired" ) {
+                    this.render('DisplayError', { data : function() {
+                        return { error: 'Sorry, the verification link expired.' };
+                    }});
+                }
+                else {
+                    this.render('DisplayError', { data : function() {
+                        return { error: err.error };
+                    }});
+                }
+            }
+            else {
+                Router.go('/dashboard');
+            }
+        });
+    }
+});
+
+Router.route('ResetPasswordLink', {
+    path: '/resetPassword/:token',
+    template: 'ResetPasswordPage',
+    layoutTemplate: '',
+    data: function() {
+        return {
+            token: this.params.token,
+        }
+    }
+});
+
+
+///////////////////////////////////////////////////////
+//  "Back-end" routes (when logged-in)
+//
+
+Router.route('DashboardPage', {
+    path: '/dashboard',
+    template: 'DashboardPage',
+    onBeforeAction: userFilter,
+}, { 'where' : 'client' });
+
+
+/*
+ *  Application management routes
+ */
+
+Router.route('AppsPage', {
+    path: '/apps',
+    template: 'AppsPage',
+    onBeforeAction: userFilter,
+}, { 'where' : 'client' });
+
+
+Router.route('ApplicationPage', {
+    path: '/apps/:_appName',
+    template: 'ApplicationPage',
+    onBeforeAction: userFilter,
+    data: function() {
+        return {
+            "appName" : this.params._appName
+        }
+    }
+}, { 'where' : 'client' });
+
+
+Router.route('VersionPage', {
+    path: '/apps/:_appName/v/:_appVersion',
+    template: 'VersionPage',
+    onBeforeAction: userFilter,
+    data: function() {
+        return {
+            "appName" : this.params._appName,
+            "appVersion" : this.params._appVersion
+        }
+    }
+}, { 'where' : 'client' });
+
+
+Router.route('BuildErrorPage', {
+    path: '/apps/:_appName/v/:_appVersion/builderror',
+    template: 'BuildErrorPage',
+    onBeforeAction: userFilter,
+    data: function() {
+        return {
+            "appName" : this.params._appName,
+            "appVersion" : this.params._appVersion
+        }
+    }
+}, { 'where' : 'client' });
+
+Router.route('DrivePage', {
+    path: '/drive/:_path(.*)?',
+    template: 'Drive',
+    onBeforeAction: userFilter,
+    data: function() {
+        return this.params._path;
+    }
+});
+
+Router.route('InstanciationsPage', {
+    path: '/instanciations',
+    template: 'InstanciationsPage',
+    onBeforeAction: userFilter,
+});
+
+Router.route('AppsBuildingPage', {
+    path: '/builds',
+    template: 'AppsBuildingPage',
+    onBeforeAction: userFilter,
+});
+
+Router.route('BillingPage', {
+    path: '/billing',
+    template: 'BillingPage',
+    onBeforeAction: userFilter,
+});
+
+Router.route('InvoicePage', {
+    path: '/invoice/:_invoiceId',
+    template: 'InvoicePage',
+    onBeforeAction: userFilter,
+    layoutTemplate: "",
+    data: function() {
+        return { invoiceId : this.params._invoiceId };
+    }
+});
+
+/*
+Router.route('SettingsPage', {
+    path: '/settings',
+    template: 'SettingsPage',
+    onBeforeAction: userFilter,
+});
+*/
+
+///////////////////////////////////////////////////////
+//  Admin routes
+//
+
+Router.route('AdminUserConfigurationPage', {
+    path: '/admin/user/:userId',
+    template: 'AdminUserConfigurationPage',
+    onBeforeAction: adminFilter,
+    data: function() {
+        return {
+            "userId" : this.params.userId
+        }
+    }
+});
+
+Router.route('AdminEditInvoicePage', {
+    path: 'admin/editInvoice/user/:userId/invoice/:month',
+    template: 'AdminEditInvoicePage',
+    onBeforeAction: adminFilter,
+    data: function() {
+        return {
+            "userId" : this.params.userId,
+            "month" : this.params.month
+        }
+    }
+});
+
+
+
+Router.route('AdminPage', {
+    path: '/admin',
+    template: 'AdminPage',
+    onBeforeAction: adminFilter
+});

@@ -1,0 +1,22 @@
+<head>
+    <!-- Google Tag Manager -->
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-WQ25TSC');</script>
+    <!-- End Google Tag Manager -->
+
+    <meta charset="utf-8">
+    <meta name="description" property="og:description" content="Créez des semelles orthopédiques adaptées à vos patients à partir de scan 3D de leurs pieds.">
+    <meta property="og:image" content="https://www.scientifeet.com/img/logo/LogoScientiFeet.png">
+    <meta property="og:title" content="{{_ 'La_semelle_paramétrable_-_ScientiFeet' }}">
+    <meta property="og:locale" content="{{_ 'fr_FR' }}" />
+
+    <!-- load glyphicons from bootstrap cdn to ensure faster load -->
+    <link href="//netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css" rel="stylesheet">
+</head>
+
+<template name="Loading">
+    {{> spinner }}
+</template>

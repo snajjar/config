@@ -1,0 +1,866 @@
+import swal from 'sweetalert2';
+
+var debug = function(o) {
+    console.log(JSON.stringify(o, null, 2));
+}
+
+Template.Drive.onCreated(function() {
+    var self = this;
+
+    // hold all reactive var in main Drive template
+    this.selectedFile = new ReactiveVar(null);
+    this.path = new ReactiveVar(pathUtils.join("/", self.data || ""));
+    this.objectsDeps = new Deps.Dependency();
+    this.objects = new ReactiveVar({});
+    this.rootUrl = new ReactiveVar('/');
+    this.status = new ReactiveVar("loading...");
+    this.loading = new ReactiveVar(true);
+
+    // search/filter
+    this.filter = new ReactiveVar(null); // for search
+    this.filterChangeTimeout = null;
+
+    // sort
+    this.sort = new ReactiveVar('name-asc');
+    this.sorts = {
+        "name" : {
+            "asc" : function(a, b) {
+                if(a.name < b.name) return -1;
+                if(a.name > b.name) return 1;
+                return 0;
+            },
+            "desc": function(a, b) {
+                return -1 * self.sorts.name.asc(a,b);
+            }
+        },
+        "date" : {
+            "asc" : function(a, b) {
+                if(a.LastModified < b.LastModified) return -1;
+                if(a.LastModified > b.LastModified) return 1;
+                return 0;
+            },
+            "desc": function(a, b) {
+                return -1 * self.sorts.date.asc(a,b);
+            }
+        },
+        "size" : {
+            "asc" : function(a, b) {
+                if(a.Size < b.Size) return -1;
+                if(a.Size > b.Size) return 1;
+                return 0;
+            },
+            "desc": function(a, b) {
+                return -1 * self.sorts.size.asc(a,b);
+            }
+        }
+    }
+
+    // uploaders
+    this.uploaders = [];
+    this.uploadersDeps = new Deps.Dependency();
+    this.setUploaderDone = function(fullPath) {
+        var index = this.uploaders.findIndex(function(el) {
+            return el.fullPath == fullPath;
+        });
+        if( index !== -1 ) {
+            this.uploaders[index].done = true;
+            this.uploadersDeps.changed();
+        }
+        else {
+            console.error('[UPLOAD] Could not remove uploader: ' + fullPath);
+        }
+    }
+
+    this.setUploaderFailed = function(fullPath) {
+        var index = this.uploaders.findIndex(function(el) {
+            return el.fullPath == fullPath;
+        });
+        if( index !== -1 ) {
+            this.uploaders[index].failed = true;
+            this.uploadersDeps.changed();
+        }
+        else {
+            console.error('[UPLOAD] Could not remove uploader: ' + fullPath);
+        }
+    }
+
+    this.clearSelection = function() {
+        this.selectedFile.set(null);
+        $('.drivefile').removeClass('selected');
+    }
+
+    this.setCurrentPath = function(path) {
+        this.clearSelection();
+        this.path.set(path);
+        window.history.pushState("Drive", "Drive - ShapeX.io", Meteor.absoluteUrl(pathUtils.join('drive/', path)));
+    }
+});
+
+Template.Drive.events({
+    "click .link-to-dashboard" : function(e, t) {
+        Router.go('DashboardPage');
+    },
+
+    "click .btn-create-folder" : function(e, t) {
+        var instance = Template.instance();
+        swal({
+            title: "Type your folder name:",
+            type: "input",
+            showCancelButton: true,
+            input: "text"
+        }).then( function(result){
+            if (result.value === false) return false;
+            if (result.value === "") {
+                swal.showInputError("You need to enter a folder name!");
+                return false;
+            }
+
+            var folderPath = pathUtils.join(instance.path.get(), result.value);
+            t.status.set('creating folder ' + folderPath);
+            Meteor.call('drive.createFolder', folderPath, function(err, result) {
+                t.status.set(null);
+                if(err) {
+                    showError(err, err.reason);
+                }
+                else {
+                    t.objectsDeps.changed();
+                }
+            });
+
+            return true;
+        });
+    },
+
+    "click .gotopath" : function(e, t) {
+        e.preventDefault();
+
+        var link = $(e.target);
+        var targetPath = link.attr('href').replace('/drive/', '');
+
+        t.setCurrentPath(targetPath);
+    },
+
+    "change .drive-sort select": function(e, t) {
+        var val = $(e.target).val();
+        console.log('change sort to ' + val);
+        t.sort.set(val);
+        t.objectsDeps.changed();
+    },
+
+    "keyup .drive-search input[type='text']" : function(e, t) {
+        var val = $(e.target).val();
+        var filter = t.filter.get();
+        if( val !== filter ) {
+            clearTimeout(t.filterChangeTimeout);
+            t.filterChangeTimeout = setTimeout(function() {
+                val == "" ? t.filter.set(null) : t.filter.set(val);
+            }, 200);
+        }
+        console.log('search: ' + val);
+    }
+});
+
+Template.Drive.helpers({
+    hasSelectedFile: function() {
+        var selectedFile = Template.instance().selectedFile.get();
+        return selectedFile !== null;
+    },
+
+    pathFolders: function() {
+        var path = Template.instance().path.get();
+        console.log("path folder: path= " + path);
+        folders = path.split('/').filter(function(v) { return v != "/" && v.length > 0; });
+        console.log("path folders: folders= " + JSON.stringify(folders,null,2));
+
+        for(var i=0; i<folders.length; i++) {
+            let prevPath = i>0 ? folders[i-1].path : "/drive/";
+            folders[i] = {
+                name: folders[i],
+                path: pathUtils.join(prevPath, folders[i])
+            };
+        }
+        return folders;
+    },
+});
+
+
+Template.DetailsPanel.helpers({
+    getSelectedFile: function() {
+        return Template.instance().findParent('Drive').selectedFile.get();
+    },
+});
+
+Template.FileDetailsDisplay.events({
+    "click .showLink" : function(e, t) {
+        var filePath = pathUtils.join(t.drive.path.get(), this.path);
+        //var link = Meteor.absoluteUrl('api/file/' + Meteor.userId() + filePath);
+        var link = this.url.replace('appbuilder-files.s3.eu-central-1.amazonaws.com', Meteor.settings.public.cloudfrontHost);
+        console.log(this);
+        swal({
+            title: "Copy this link",
+            html:
+                "<div style='text-align: left;'>" +
+                    "<label>CDN link</label>" +
+                    "<textarea rows=4 style='width: 100%;'>" + link + "</textarea>" +
+                "</div>"
+        });
+    },
+
+    "click .btn-delete-file": function(e, t) {
+        var selectedFileDiv = $(e.target).closest('.btn-delete-file');
+        var selectedFile = t.drive.selectedFile.get();
+        var name = selectedFile.name;
+        var type = selectedFile.type;
+
+        var path = pathUtils.join(t.drive.path.get(), selectedFileDiv.attr('data-path'));
+        console.log("deleting file at path: " + path);
+
+        swal({
+            title: "Are you sure?",
+            text: "you are going to delete " + type + " " + name + "?",
+            type: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#DD6B55",
+            confirmButtonText: "Yes, delete it!"
+        }).then((result) => {
+            if (result.value) {
+                t.drive.clearSelection();
+                t.drive.status.set('deleting ' + path);
+                Meteor.call('drive.delete', path, function(err, res) {
+                    t.drive.status.set(null);
+                    if( err ) {
+                        showError("Error deleting " + type, err.toString());
+                        return;
+                    }
+                    else {
+                        t.drive.objectsDeps.changed();
+                    }
+                });
+            }
+        });
+    }
+});
+
+Template.FileDetailsDisplay.onCreated(function() {
+    this.drive = this.findParent('Drive');
+});
+
+Template.FileDetailsDisplay.helpers({
+    isFile: function() {
+        return this.type == "file";
+    },
+
+    isDir: function() {
+        return this.type == "folder";
+    },
+
+    isImg: function() {
+        var supportedImages = ["bmp", "svg", "jpg", "jpeg", "png", "gif"];
+        return supportedImages.indexOf(this.ext.toLowerCase()) != -1;
+    },
+
+    getFileUrl: function() {
+        return Meteor.absoluteUrl(pathUtils.join(
+            'api/file/',
+            Meteor.userId(),
+            Template.instance().drive.path.get(),
+            this.path
+        ));
+    }
+});
+
+var isFileDraggedOver = function(e) {
+    var dt = e.originalEvent.dataTransfer;
+    return dt.types != null && (dt.types.indexOf ? dt.types.indexOf('Files') != -1 : dt.types.contains('application/x-moz-file'));
+}
+
+Template.DriveFile.onRendered(function(e) {
+    // create drag images for all the files
+    console.log('creating drag image');
+    $(this.find('.drivefile')).customDragImage({
+        offsetX: 30,
+        offsetY: 30,
+        createDragImage: function($node) {
+            return $node.clone().removeClass('selected').addClass('copy-beeing-dragged');
+        }
+    });
+});
+
+
+Template.DriveFoldersView.onCreated(function() {
+    var self = this;
+
+    // get drive template
+    this.drive = self.findParent('Drive');
+    var drive = this.drive;
+
+    // utils for drag & drop
+    self.dragCount = 0;
+    self.dragDirCount = 0;
+    self.clickHolder = null; // used to prevent click when user means dblclick
+
+    // keyMarker: the key from which we start listing (or null)
+    this.loadFiles = function( continuationToken ) {
+        console.log('Load files from path ' + path + ' with continuation token ' + continuationToken);
+
+        // set loader
+        drive.loading.set(true);
+
+        var path = drive.path.get();
+        drive.status.set('loading ' + path + " ...");
+
+        Meteor.call('drive.list', path, continuationToken, function(err, res) {
+            drive.loading.set(false);
+            drive.status.set(null);
+
+            // index and sort a set of amazon s3 objects
+            var indexAndSort = function( data ) {
+                // now, sort objects with the selected sort method and order,
+                // but with folders first
+                var sort = drive.sort.get();
+                var sortMethod = sort.split('-')[0];
+                var sortOrder  = sort.split('-')[1];
+                console.log('Sorting by ' + sortMethod + ' in ' + sortOrder + ' order');
+
+                data.Contents.sort(function(a,b) {
+                    if( a.name === undefined ) debug;
+                    if( a.type == "folder" ) {
+                        // always folders before files
+                        // folders only sorted by alphanum order (no date or last modified)
+                        return b.type == "file" ? -1 : drive.sorts.name.asc(a, b);
+                    }
+                    else {
+                        return b.type == "folder" ? 1 : drive.sorts[sortMethod][sortOrder](a, b);
+                    }
+                });
+
+                // insert ".." directory if we're not at root
+                if( !continuationToken && drive.path.get() != "/" ) {
+                    data.Contents.unshift({
+                        Key: pathUtils.join("local", Meteor.userId(), path, ".."),
+                        LastModified: "",
+                        Etag: "",
+                        StorageClass: "STANDARD",
+                        name: "..",
+                        ext: "",
+                        type: "folder",
+                        path: pathUtils.join( path, ".." ),
+                        url: pathUtils.join( drive.rootUrl.get(), drive.path.get(), ".."),
+                        iconHTML: "" // "<i class='glyphicon glyphicon-arrow-left'></i>"
+                    });
+                }
+
+                // index the content after sort
+                for(var i=0; i<data.Contents.length; i++) {
+                    var o = data.Contents[i];
+                    o.index = i;
+                }
+            }
+
+            if( err ) {
+                showError("Error listing drive", err.toString());
+            }
+            else {
+                drive.rootUrl.set(res.rootUrl);
+
+                // process response
+                if( res.data.Contents ) {
+                    //console.log("prefix: " + res.data.Prefix);
+
+                    //console.log("Content: " + JSON.stringify(res.data.Contents,null,2));
+
+                    // list files in the current directory
+                    for(var i=0; i<res.data.Contents.length; i++) {
+                        var o = res.data.Contents[i];
+                        var relativeKey = o.Key.slice(res.data.Prefix.length);
+
+                        o.name = pathUtils.basename(o.Key);
+                        o.ext  = pathUtils.extname(o.Key).substr(1);
+                        o.type = "file";
+                        o.path = o.Key.substr(res.data.Prefix.length);
+                        o.url = pathUtils.removeSuffix(drive.rootUrl.get() + pathUtils.join(drive.path.get(), o.name), '/');
+                        o.iconHTML = o.ext.toUpperCase();
+                        //console.log("listing file " + o.name + " at path " + o.path);
+                    }
+
+                    // list folders that are in the common prefixes
+                    for(var i=0; i<res.data.CommonPrefixes.length; i++) {
+                        var o = res.data.CommonPrefixes[i];
+                        var relativeKey = o.Prefix.slice(res.data.Prefix.length);
+
+                        o.name = pathUtils.basename(o.Prefix);
+                        o.type = "folder";
+                        o.path = o.Prefix.substr(res.data.Prefix.length);
+                        o.url = pathUtils.removeSuffix(drive.rootUrl.get() + pathUtils.join(drive.path.get(), o.name), '/');
+                        //console.log("listing folder " + o.name + " at path " + o.path);
+
+                        res.data.Contents.push(o);
+                    }
+
+                    // Remove the self element
+                    for(var i=res.data.Contents.length-1; i>=0; i--) {
+                        var o = res.data.Contents[i];
+
+                        // remove current directory from the listing
+                        if( o.path == "" || o.path == "/" ) {
+                            res.data.Contents.splice(i,1);
+                            break;
+                        }
+                    }
+
+                    // set up the objects
+                    if( continuationToken ) {
+                        // we are in a follow-up request, merge this result with the previous one
+                        var merged = drive.objects.get();
+                        merged.Contents = merged.Contents.concat( res.data.Contents );
+                        indexAndSort( merged );
+                        drive.objects.set(merged);
+                        //console.log('Content size: ' + merged.Contents.length );
+                    }
+                    else {
+                        indexAndSort( res.data );
+                        drive.objects.set(res.data);
+                    }
+
+                    if( res.data.IsTruncated ) {
+                        // we need to start a followup request
+                        self.loadFiles( res.data.NextContinuationToken );
+                    }
+                    else {
+                        //console.log(res.data);
+                        drive.status.set(null);
+                    }
+                }
+                else {
+                    console.log("No objects resolved from path: " + drive.path.get());
+                }
+            }
+        });
+
+    }
+
+    this.autorun(function() {
+        // link to Drive reactive vars
+        drive.objectsDeps.depend(); // create a dependency
+        self.loadFiles();
+    });
+});
+
+Template.DriveFoldersView.helpers({
+    isLoading : function() {
+        return Template.instance().drive.loading.get();
+    },
+
+    getStatus : function() {
+        return Template.instance().drive.status.get();
+    },
+
+    getObjects: function() {
+        // get content
+        var drive = Template.instance().drive;
+        var content = drive.objects.get().Contents;
+
+        // depends reactivly on objects and filter
+        drive.objectsDeps.depend();
+
+        // apply search filter
+        var filter = drive.filter.get();
+        if( filter !== null ) {
+            console.log('Filtering content with string: ' + filter);
+            content = content.filter(function(el) {
+                return el.name.toLowerCase().indexOf(filter.toLowerCase()) !== -1 || el.name == "..";
+            });
+        }
+
+        return content;
+    },
+
+    isFile: function() {
+        return Template.instance().drive.selectedFile.get().type == "file";
+    },
+
+    reduced: function() {
+        var hasSelectedFile = Template.instance().drive.selectedFile.get() !== null;
+        return hasSelectedFile ? "reduced" : "";
+    }
+});
+
+
+
+Template.DriveFoldersView.events({
+    "click .drive-container" : function(e, t) {
+        console.log('[EVENT] click on drive container');
+
+        // unselect current file
+        $('.drivefile').removeClass('selected').removeClass('dragover');
+        t.drive.selectedFile.set(null);
+    },
+
+    "dragenter .drive-container" : function(e, t) {
+        if( isFileDraggedOver(e) ) {
+            t.dragCount++;
+            $('.drive-container').addClass('dragover');
+        }
+    },
+
+    "dragover .drive-container": function(e, t) {
+        if( isFileDraggedOver(e) ) {
+            e.stopPropagation();
+            e.preventDefault();
+            e.originalEvent.dataTransfer.dropEffect = 'copy';
+        }
+    },
+
+    "dragleave .drive-container" : function(e, t) {
+        if( isFileDraggedOver(e) ) {
+            t.dragCount--;
+            if( t.dragCount == 0 ) {
+                $('.drive-container').removeClass('dragover');
+            }
+        }
+    },
+
+    "drop .drive-container, drop .drivefile.nodir" : function(e, t) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        console.log('drop on drive container');
+
+        var currentPath = t.drive.path.get();
+
+        $('.drivefile').removeClass('dragged');
+
+        function traverseFileTree(item, path) {
+            path = path || "";
+            if (item.isFile) {
+                // Get file
+                item.file(function(file) {
+                    var fullPath = pathUtils.join(currentPath, path, file.name);
+                    console.log("File:", path + file.name, "Uploading to: " + fullPath);
+
+                    var uploadObj = {
+                        template: t,
+                        name: file.name,
+                        fullPath: fullPath,
+                        size: file.size,
+                        failed: false,
+                        done: false,
+                        file: file,
+                    };
+
+                    t.drive.uploaders.push(uploadObj);
+                    t.drive.uploadersDeps.changed();
+                });
+            } else if (item.isDirectory) {
+                console.log("Folder: " + item.fullPath);
+
+                // create folder
+                var folderPath = pathUtils.join(t.drive.path.get(),item.fullPath);
+                t.drive.status.set('Creating folder ' + folderPath);
+                Meteor.call('drive.createFolder', folderPath, function(err, result) {
+                    t.drive.status.set(null);
+                    if(err) {
+                        showError(err, err.reason);
+                    }
+                    else {
+                        t.drive.objectsDeps.changed();
+                    }
+                });
+
+                // Get folder contents
+                var dirReader = item.createReader();
+                dirReader.readEntries(function(entries) {
+                    for (var i=0; i<entries.length; i++) {
+                        traverseFileTree(entries[i], path + item.name + "/");
+                    }
+                });
+            }
+        }
+
+        if( isFileDraggedOver(e) ) {
+            // remove dragover style
+            t.dragCount = 0;
+            $('.drive-container').removeClass('dragover');
+
+            // upload files
+            var files = e.originalEvent.dataTransfer.files;
+            var items = e.originalEvent.dataTransfer.items;
+            for (var i=0; i<items.length; i++) {
+                // webkitGetAsEntry is where the magic happens
+                var item = items[i].webkitGetAsEntry();
+                if (item) {
+                    traverseFileTree(item);
+                }
+            }
+        }
+    },
+
+    "dragstart .drivefile": function(e, t) {
+        console.log('dragstart');
+        var driveFile = $(e.target).closest('.drivefile');
+
+        // set it as selected file
+        var newSelectedFile = t.drive.objects.get().Contents[ $(driveFile).attr('data-index') ];
+        t.drive.selectedFile.set(newSelectedFile);
+
+        e.originalEvent.effectAllowed = 'move';
+        e.originalEvent.dataTransfer.setData('index', driveFile.attr('data-index'));
+
+        // don't modify the DOM during dragstart, chrome bug
+        setTimeout(function(e) {
+            driveFile.addClass('selected').addClass('dragged');
+        }, 0);
+    },
+
+    "dragend .drivefile" : function(e, t) {
+        // remove dragged class
+        console.log('dragend');
+        var driveFile = $(e.target).closest('.drivefile');
+        $('.drivefile').removeClass('selected');
+        $('.drivedir').removeClass('dragover');
+        driveFile.removeClass('dragged');
+        driveFile.removeClass('dragover');
+        driveFile.addClass('selected');
+    },
+
+    "dragenter .drivefile" : function(e, t) {
+        t.dragDirCount++;
+        $('.drivefile').removeClass('dragover');
+        $(e.target).closest('.drivefile').addClass('dragover');
+    },
+
+    "dragover .drivefile": function(e, t) {
+        // required for drop event to be fired
+        e.preventDefault();
+    },
+
+    "dragleave .drivedir" : function(e, t) {
+        t.dragDirCount--;
+        if( t.dragDirCount == 0 ) {
+            $(e.target).closest('.drivefile').removeClass('dragover');
+        }
+    },
+
+    "drop .drivefile.drivedir" : function(e, t) {
+        e.stopPropagation();
+        e.preventDefault();
+
+        console.log('drop on drivefile');
+
+        // remove directory dragover css class
+        t.dragDirCount = 0;
+        $('.drivedir').removeClass('dragover');
+
+        // remove zone dragover css class
+        t.dragCount = 0;
+        $('.drive-container').removeClass('dragover');
+
+        var dstIndex = parseInt($(e.target).closest('.drivedir').attr('data-index'));
+        var srcIndex = parseInt(e.originalEvent.dataTransfer.getData('index'));
+        if( dstIndex == srcIndex ) {
+            console.log("won't drop a folder to itself");
+            return;
+        }
+        var src = t.drive.objects.get().Contents[srcIndex];
+        var dst = t.drive.objects.get().Contents[dstIndex];
+
+        console.log("transfering " + src.type + " " + src.name + " to folder " + dst.path);
+        var srcPath = pathUtils.join(t.drive.path.get(), src.name + (src.type=="folder"?"/":""));
+        var dstPath = pathUtils.join(t.drive.path.get(), dst.name);
+        t.drive.status.set('Moving ' + src.name + ' to ' + dstPath);
+        Meteor.call('drive.move', srcPath, dstPath, function(err, r) {
+            t.drive.status.set(null);
+            if(err) {
+                showError('Error moving file', err.toString());
+            }
+            else {
+                t.drive.objectsDeps.changed();
+            }
+        });
+    },
+
+    'click .drivefile' : function(e, t) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        clearTimeout(t.clickHolder);
+        t.clickHolder = setTimeout(function() {
+            console.log('[EVENT] click on drive file');
+
+            var driveFile = $(e.target).closest('.drivefile');
+            if( driveFile.hasClass('selected') ) {
+                // that's the 2nd click
+                if( driveFile.hasClass('drivedir') ) {
+
+                    //Router.go(pathUtils.join("/drive",newPath) + "/"); -- WHY IS DIS BROKEN :(
+                    return;
+                }
+            }
+
+            // set selected class only on this drivefile
+            $('.drivefile').removeClass('selected');
+            driveFile.addClass('selected');
+
+            var newSelectedFile = t.drive.objects.get().Contents[ $(driveFile).attr('data-index') ];
+            t.drive.selectedFile.set(newSelectedFile);
+        }, 200);
+    },
+
+    'dblclick .drivedir' : function(e, t) {
+        // clear click event that happened before this dblclick
+        clearTimeout(t.clickHolder);
+        console.log('[EVENT] dblclick on drive dir');
+
+        // go in the selected folder
+        e.preventDefault();
+        e.stopPropagation();
+        var driveDir = $(e.target).closest('.drivedir');
+        var dirName = driveDir.attr('data-name');
+        var newPath = pathUtils.removeSuffix(pathUtils.join(t.drive.path.get(), dirName));
+        t.drive.objects.set({}); // stop displaying files & folder
+        t.drive.setCurrentPath(newPath);
+    },
+
+})
+
+Template.UploadWindow.onCreated(function() {
+    this.drive = this.findParent('Drive');
+    this.expanded = new ReactiveVar(true);
+});
+
+Template.UploadWindow.helpers({
+    uploadNow: function () {
+        var drive = Template.instance().drive;
+        drive.uploadersDeps.depend();
+        var uploaders = drive.uploaders.filter(function notDone(el) { return el.done !== true; });
+        if( uploaders.length == 0 ) {
+            // no failed uploads, just reset everything
+            uploaders = drive.uploaders = [];
+        }
+
+        return uploaders.length != 0;
+    },
+
+    nbUploaders : function() {
+        var drive = Template.instance().drive;
+        drive.uploadersDeps.depend();
+        return drive.uploaders.filter(function notDone(el) { return el.done !== true; }).length;
+    },
+
+    uploaders: function() {
+        var drive = Template.instance().drive;
+        drive.uploadersDeps.depend();
+        return drive.uploaders;
+    },
+
+    hide: function() {
+        var expanded = Template.instance().expanded.get();
+        return expanded ? "" : "hide";
+    },
+});
+
+Template.UploadWindow.events({
+    "click .btn-collapse-uploads": function(e, t) {
+        t.expanded.set( !t.expanded.get() );
+    }
+});
+
+Template.UploadBar.onCreated(function() {
+    this.done = false;
+    this.failed = false;
+    this.aborted = false;
+    this.drive = this.findParent('Drive');
+
+    if( this.data && this.data.file ) {
+        var self = this;
+        this.uploader = new Slingshot.Upload("fileUpload");
+        this.fullPath = this.data.fullPath;
+        this.file = this.data.file;
+        this.mainTemplate = this.data.template;
+        this.failed = false;
+        this.aborted = false;
+
+        this.startUpload = function() {
+            this.done = false;
+            this.failed = false;
+            this.aborted = false;
+
+            Meteor.call("drive.setUploadPath", this.fullPath, this.file.name, this.file.size, function(err, r) {
+                if( err ) {
+                    showError(err.error, err.reason);
+                    return;
+                }
+
+                self.uploader.send(self.file, function (error, downloadUrl) {
+                    if (error) {
+                        if( self.uploader.xhr && self.uploader.xhr.response ) {
+                            console.error('Error uploading ' + self.file.name + ': ' + self.uploader.xhr.response);
+                            //showError('Error uploading file: ' + self.file.name, self.uploader.xhr.response);
+                        }
+
+                        self.failed = true;
+                        self.drive.setUploaderFailed(self.fullPath);
+                    }
+                    else {
+                        self.done = true;
+                        self.drive.setUploaderDone(self.fullPath);
+
+                        // refresh the display
+                        self.drive.objectsDeps.changed();
+                    }
+                });
+            });
+
+            self.drive.uploadersDeps.changed();
+        }
+
+        this.startUpload();
+    }
+});
+
+Template.UploadBar.helpers({
+    progress: function() {
+        var progress = Math.round( Template.instance().uploader.progress() * 100 );
+        return progress;
+    },
+
+    fileName: function() {
+        return Template.instance().file.name;
+    },
+
+    failed: function() {
+        return Template.instance().failed;
+    },
+
+    aborted: function() {
+        return Template.instance().aborted;
+    },
+
+    uploading: function() {
+        return Template.instance().done !== true;
+    }
+});
+
+Template.UploadBar.events({
+    'click .btn-cancel' : function(e, t) {
+        t.uploader.xhr.abort();
+        t.aborted = true;
+        t.failed = false;
+    },
+
+    'click .btn-restart' : function(e, t) {
+        t.startUpload();
+    },
+});
+
+Template.DriveFile.helpers({
+    isFile: function() {
+        return this.type == "file";
+    },
+
+    isDir: function() {
+        return this.type == "folder";
+    }
+});
+
+

@@ -1,0 +1,1147 @@
+/**
+ *   Default Schema (for all objects)
+ */
+
+import moment from 'moment';
+
+import SimpleSchema from 'simpl-schema';
+SimpleSchema.extendOptions(['autoform']);
+
+// Error messages
+SimpleSchema.setDefaultMessages({
+    messages: {
+        en: {
+          "no_spaces": "No space allowed here!",
+          "too_long": "Too long!"
+        },
+    },
+});
+
+
+Schema = {};
+Schema.Default = new SimpleSchema({
+    updatedAt: {
+        type: Date,
+        autoValue: function () {
+            if (this.isUpdate || this.isInsert || this.isUpsert) {
+                return new Date();
+            }
+        },
+        autoform: {
+            omit: true,
+        }
+    },
+
+    // creation date
+    createdAt: {
+        type: Date,
+        autoValue: function() {
+            if (this.isInsert) {
+                return new Date();
+            } else if (this.isUpsert) {
+                return {$setOnInsert: new Date()};
+            } else {
+                this.unset();
+            }
+        },
+        autoform: {
+            omit: true,
+        },
+    },
+
+    // owner
+    ownerId: {
+        type: String,
+        regEx: SimpleSchema.RegEx.Id,
+        autoValue: function () {
+            if (this.isInsert && (!this.isSet || this.value.length === 0)) {
+                return this.userId;
+            }
+        },
+        autoform: {
+            omit: true,
+        },
+        denyUpdate: true
+    }
+});
+
+/**
+ *   AppsGroups
+ */
+AppGroups = new Mongo.Collection("AppGroups");
+Schema.AppGroups = new SimpleSchema({
+    name: {
+        label: 'Group name',
+        type: String,
+        max: 120,
+        unique: true,
+    },
+});
+Schema.AppGroups.extend(Schema.Default);
+AppGroups.attachSchema(Schema.AppGroups);
+
+
+/**
+ *   Apps
+ */
+Apps = new Mongo.Collection("Apps");
+Schema.Apps = new SimpleSchema({
+    name: {
+        label: 'App name',
+        type: String,
+        max: 120,
+        unique: true,
+    },
+
+    description: {
+        label: 'Description',
+        type: String,
+        optional: true,
+    },
+
+    // object that hold a phaseKey -> versionId link
+    // for now, we handle dev, alpha, beta and production
+    phases: {
+        type: Object,
+        blackbox: true,
+        defaultValue: {},
+    }
+});
+Schema.Apps.extend(Schema.Default);
+Apps.attachSchema(Schema.Apps);
+Apps.helpers({
+    removeOnCascade : function(cb) {
+        // delete an application and everything linked to it
+        Meteor.call('deleteApplication', this._id, cb);
+    },
+
+    hasPhase: function() {
+        if( !this.phases ) return false;
+
+        var p = ["dev", "alpha", "beta", "production"];
+        for(var i=p.length - 1; i>= 0; i--) {
+            if( this.phases[p[i]] ) {
+                return true;
+            }
+        }
+
+        return false;
+    },
+
+    getLastPhase: function() {
+        if( !this.phases ) return false;
+
+        var p = ["dev", "alpha", "beta", "production"];
+        for(var i=p.length - 1; i>= 0; i--) {
+            if( this.phases[p[i]] ) {
+                return p[i];
+            }
+        }
+
+        return false;
+    },
+
+    getLastPhaseVersionId: function() {
+        if( !this.phases ) return false;
+
+        var p = ["dev", "alpha", "beta", "production"];
+        for(var i=p.length - 1; i>= 0; i--) {
+            if( this.phases[p[i]] ) {
+                return this.phases[p[i]];
+            }
+        }
+
+        return false;
+    },
+
+    getMonthInstanciations: function() {
+        var s = 0;
+        var versions = AppVersions.find({ 'appName' : this.name }).fetch();
+        for(var i=0; i<versions.length; i++) {
+            s += versions[i].getMonthInstanciations();
+        }
+        return s;
+    },
+
+    getTotalInstanciations: function() {
+        var s = 0;
+        var versions = AppVersions.find({ 'appName' : this.name }).fetch();
+        for(var i=0; i<versions.length; i++) {
+            s += versions[i].getTotalInstanciations();
+        }
+        return s;
+    },
+
+    getName: function(n) {
+        if( !n ) n=20;
+        return this.name.length > n ?
+            this.name.substr(0,n-3) + '...' :
+            this.name;
+    }
+})
+
+/**
+ *   App Versions
+ */
+AppVersions = new Mongo.Collection("AppVersions");
+Schema.AppVersions = new SimpleSchema({
+    appId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+    appName: {
+        // redondant but can be useful.
+        label: 'App name',
+        type: String,
+        max: 120,
+        autoform: {
+            type: "hidden",
+            label: false
+        }
+    },
+    appVersion: {
+        label: 'Version',
+        type: String,
+        max: 120,
+        custom: function () {
+            if( this.value.replace(/\s/g, '') != this.value ) {
+                return "no_spaces";
+            }
+        }
+    },
+    title : {
+        label: 'Title',
+        type: String,
+        optional: true,
+    },
+    changelog: {
+        label: 'changelog',
+        type: String,
+        optional: true,
+        autoform: {
+            rows: 5
+        }
+    },
+    json: {
+        label: 'Json definition',
+        type: String,
+        defaultValue: "{}",
+        optional: true
+    },
+    deployStatus: {
+        type: String,
+        defaultValue: "Not deployed",
+        autoform: {
+            omit: true,
+        },
+        allowedValues: ["Not deployed", "in queue", "building...", "built", "deployed", "error"],
+    },
+    debugBuild: {
+        label: "Debug build",
+        type: Boolean,
+        defaultValue: false,
+    },
+
+    /*
+     * DEPRECATED
+     *
+    profilerBuild : {
+        label: "Profiler",
+        type: Boolean,
+        defaultValue: false,
+    },
+    logLevel : {
+        label: "Default log level",
+        type: String,
+        allowedValues: ["error", "warn", "info", "log", "debug"],
+        defaultValue: "warn",
+        autoform: {
+            options: [
+                {label: "error", value: "error"},
+                {label: "warn", value: "warn"},
+                {label: "info", value: "info"},
+                {label: "log", value: "log"},
+                {label: "debug", value: "debug"},
+            ]
+        }
+    },
+    */
+    buildId: {
+        type: String,
+        optional: true,
+    },
+    buildError: {
+        type: String,
+        optional: true,
+    },
+    instanciations : {
+        type: Object,
+        blackbox: true,
+        defaultValue: {}
+    },
+    scriptUrl: {
+        type: String,
+        defaultValue: null,
+        optional: true,
+        autoform: {
+            omit: true,
+        },
+    },
+    cdnScriptUrl: {
+        type: String,
+        defaultValue: null,
+        optional: true,
+        autoform: {
+            omit: true,
+        },
+    },
+});
+Schema.AppVersions.extend(Schema.Default);
+AppVersions.attachSchema(Schema.AppVersions);
+AppVersions.helpers({
+    statusColor: function() {
+        var colors = {
+            "Not deployed"  : "#AAA",
+            "in queue"      : "#132c47",
+            "building..."   : "#ba8616",
+            "built"         : "#55633f",
+            "deployed"      : "#1d8e15",
+            "error"         : "red"
+        }
+
+        return colors[this.deployStatus];
+    },
+
+    isDeployed: function() {
+        return this.deployStatus == "deployed";
+    },
+
+    getMonthInstanciations: function() {
+        var now = new Date();
+        var monthId = moment().format('YYYY-MM');
+        if( this.instanciations && this.instanciations[monthId] ) {
+            return this.instanciations[monthId];
+        }
+        else {
+            return 0;
+        }
+    },
+
+    getTotalInstanciations: function() {
+        var s = 0;
+        if( this.instanciations ) {
+            var keys = Object.keys( this.instanciations );
+            for(var i=0; i<keys.length; i++) {
+                s += this.instanciations[keys[i]];
+            }
+        }
+        return s;
+    },
+
+    delete: function() {
+        // first, check if the version is assigned to a phase of the app
+        // if so, ask for confirmation, then remove it from the app's phases
+        var self = this;
+        var app = Apps.findOne({ 'name' : this.appName });
+        var updateApp = false;
+        var cancelRemove = false;
+
+        // check which phases are impacted
+        var phasesImpacted = [];
+        var keys = Object.keys(app.phases);
+        for(var i=0; i<keys.length; i++) {
+            if( app.phases[ keys[i] ] == this._id ) {
+                phasesImpacted.push( keys[i] );
+                delete app.phases[ keys[i] ];
+            }
+        }
+
+        // update the app if we impact some phases
+        if( phasesImpacted.length > 0 ) {
+            Apps.update( app._id, { '$set' : { phases: app.phases } });
+        }
+
+        // then, check if the version is deployed.
+        // If so, remove the script from AWS.
+        Meteor.call("deleteVersionDeployment", this._id, function(err, r) {
+            if( err ) {
+                console.error("Version deployment has not been deleted: " + err);
+            }
+            else {
+                // Finally, delete the appversion
+                AppVersions.remove(self._id);
+            }
+        });
+    },
+
+    getStatusHTML : function() {
+        switch(this.deployStatus) {
+            case "Not deployed": return "<span class='text-muted'><i class='fa fa-circle-o'></i></span>";
+            case "in queue": return "<span class='text-blue'><i class='fa fa-pause-circle'></i> in queue</span>";
+            case "building...":return "<span class='text-orange'><i class='fa fa-spinner fa-spin'></i> building...</span>";
+            case "built": return "<span class='text-orange'><i class='fa fa-cloud-upload'></i> deploying...</span>";
+            case "deployed": return "<span class='text-green'><i class='fa fa-check'></i> ready</span>";
+            case "error": return "<span class='text-red'><i class='fa fa-exclamation-triangle'></i> <a title='see build logs' href='/app/" + this.appName + "/v/" + this.appVersion + "/builderror' class='link-to-build-error'>error</a></span>";
+            default: return "<span class='text-red'><i class='fa fa-exclamation-triangle'></i> status unknown</span>";
+        }
+    },
+
+    getName: function(n) {
+        if( !n ) n=20;
+        return this.appName.length > n ?
+            this.appName.substr(0,n-3) + '...' :
+            this.appName;
+    }
+})
+
+
+/**
+ *  Instanciations
+ */
+InstanciationsMonth = new Mongo.Collection("InstanciationsMonth");
+Schema.InstanciationsMonth = new SimpleSchema({
+    appName: {
+        // redondant but can be useful.
+        label: 'App name',
+        type: String,
+        max: 120,
+        autoform: {
+            type: "hidden",
+            label: false
+        }
+    },
+    appVersion: {
+        label: 'Version',
+        type: String,
+        max: 120,
+        custom: function () {
+            if( this.value.replace(/\s/g, '') != this.value ) {
+                return "no_spaces";
+            }
+        }
+    },
+
+    month : {
+        type: Number,
+    },
+
+    year : {
+        type: Number,
+    },
+
+    count : {
+        type: Number,
+        defaultValue: 1
+    },
+
+    // for convenience
+    appId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+    versionId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+});
+Schema.InstanciationsMonth.extend(Schema.Default);
+InstanciationsMonth.attachSchema(Schema.InstanciationsMonth);
+
+
+InstanciationsWeek = new Mongo.Collection("InstanciationsWeek");
+Schema.InstanciationsWeek = new SimpleSchema({
+    appName: {
+        // redondant but can be useful.
+        label: 'App name',
+        type: String,
+        max: 120,
+        autoform: {
+            type: "hidden",
+            label: false
+        }
+    },
+    appVersion: {
+        label: 'Version',
+        type: String,
+        max: 120,
+        custom: function () {
+            if( this.value.replace(/\s/g, '') != this.value ) {
+                return "no_spaces";
+            }
+        }
+    },
+
+    week : {
+        type: Number,
+    },
+
+    year : {
+        type: Number,
+    },
+
+    count : {
+        type: Number,
+        defaultValue: 1
+    },
+
+    // for convenience
+    appId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+    versionId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+});
+Schema.InstanciationsWeek.extend(Schema.Default);
+InstanciationsWeek.attachSchema(Schema.InstanciationsWeek);
+
+
+InstanciationsDay = new Mongo.Collection("InstanciationsDay");
+Schema.InstanciationsDay = new SimpleSchema({
+    appName: {
+        // redondant but can be useful.
+        label: 'App name',
+        type: String,
+        max: 120,
+        autoform: {
+            type: "hidden",
+            label: false
+        }
+    },
+    appVersion: {
+        label: 'Version',
+        type: String,
+        max: 120,
+        custom: function () {
+            if( this.value.replace(/\s/g, '') != this.value ) {
+                return "no_spaces";
+            }
+        }
+    },
+
+    week : {
+        type: Number,
+    },
+
+    // day of the month
+    day : {
+        type: Number,
+    },
+
+    month : {
+        type: Number,
+    },
+
+    year : {
+        type: Number,
+    },
+
+    count : {
+        type: Number,
+        defaultValue: 1
+    },
+
+    // for convenience
+    appId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+    versionId : {
+        type: String,
+        autoform: {
+            type: "hidden",
+            label: false
+        },
+    },
+});
+Schema.InstanciationsDay.extend(Schema.Default);
+InstanciationsDay.attachSchema(Schema.InstanciationsDay);
+
+/*
+ *   Notifications
+ */
+Notifications = new Mongo.Collection("Notifications");
+Schema.Notifications = new SimpleSchema({
+    type: {
+        // redondant but can be useful.
+        label: 'Type',
+        type: String,
+        max: 120,
+        allowedValues: ["build-error", "build-success", "invoice-available"],
+    },
+
+    seenByUser: {
+        type: Boolean,
+        defaultValue: false,
+    },
+
+    metadata : {
+        type: Object,
+        blackbox: true,
+
+        /*
+         * build-success, build-error {
+         *     appId,
+         *     versionId,
+         *     appName,
+         *     appVersion,
+         * }
+         *
+         */
+    },
+});
+Schema.Notifications.extend(Schema.Default);
+Notifications.attachSchema(Schema.Notifications);
+Notifications.helpers({
+    getLink: function() {
+        switch( this.type ) {
+        case "build-success":
+            return Meteor.absoluteUrl('apps/' + this.metadata.appName + '/v/' + this.metadata.appVersion);
+        case "build-error":
+            return Meteor.absoluteUrl('apps/' + this.metadata.appName + '/v/' + this.metadata.appVersion);
+        case "invoice-available":
+            return Meteor.absoluteUrl('billing/');
+        default:
+            return "#";
+        }
+    },
+
+    getHTML : function() {
+        switch( this.type ) {
+        case "build-success":
+            return '<i class="fa fa-upload fa-fw"></i> App ' + this.metadata.appName + ' deployed successfuly!';
+        case "build-error":
+            return '<i class="fa fa-warning fa-fw notif-ico-error"></i> Build error on <b>' +
+                this.metadata.appName + '</b> version <b>' + this.metadata.appVersion + '</b>';
+        case "invoice-available":
+            var monthString = moment(this.metadata.month).format('MMM YYYY');
+            return '<i class="fa fa-info-circle fa-fw"></i> Your invoice for ' + monthString + ' is available.';
+        default:
+            return "#";
+        }
+    },
+
+    getDate : function() {
+        return moment(this.createdAt).calendar();
+    },
+});
+
+/*
+ *   Config of the server.
+ *   Useful to setup and change stuff
+ */
+Configs = new Mongo.Collection("Configs");
+Schema.Configs = new SimpleSchema({
+    recipientNewUser : {
+        type: String,
+        defaultValue: 'Dualbox Admin <contact@dualbox.com>',
+        optional: true,
+        label: 'Récipients des mails: "Notification nouvel utilisateur". Entrer des addresses mails séparées par des virgules',
+    },
+
+    bccInvoiceNotification : {
+        type: String,
+        defaultValue: 'Dualbox Admin <contact@dualbox.com>',
+        optional: true,
+        label: 'bcc of Invoices Notifications mails',
+    },
+});
+Configs.attachSchema(Schema.Configs);
+
+
+
+
+/*
+ *   User definition
+ */
+
+// Notification preferences
+Schema.EmailNotificationsPreferences = new SimpleSchema({
+    notifyMeWhenMyBuildFailed: {
+        label: "Notify me when my build failed",
+        type: Boolean,
+        defaultValue: true,
+    },
+
+    notifyMeWhenMyBuildSucceeded: {
+        label: "Notify me when my build succeeded",
+        type: Boolean,
+        defaultValue: true,
+    },
+
+    notifyMeWhenMyInvoiceIsAvailable: {
+        label: "Notify me when my invoice is available",
+        type: Boolean,
+        defaultValue: true,
+    },
+});
+
+// Meteor.user().profile
+Schema.UserProfile = new SimpleSchema({
+    firstName: {
+        type: String,
+        label: function(){ return "First name" },
+        optional: true
+    },
+    lastName: {
+        type: String,
+        label: function(){ return "Last name" },
+        optional: true
+    },
+    language : {
+        type: String,
+        optional:true,
+        defaultValue: "en",
+    },
+
+    /*
+     *   Email notifications preferences
+     */
+    emailNotificationsPreferences : {
+        label: "Email notifications preferences",
+        type: Schema.EmailNotificationsPreferences,
+        optional: true
+    },
+});
+
+Schema.Address = new SimpleSchema({
+    name: {
+        label:  'Address Name',
+        type: String,
+        max: 120,
+    },
+    dest: {
+        label:  'Receiver',
+        type: String,
+        max: 120,
+    },
+    phone: {
+        label:  'Phone number',
+        type: String,
+        max: 120,
+        optional: true,
+    },
+    line1: {
+        label:  'Address L1',
+        type: String,
+        max: 120,
+    },
+    line2: {
+        label:  'Address L2',
+        type: String,
+        max: 120,
+        optional: true,
+    },
+    zipcode: {
+        label: "Zip code",
+        type: String,
+        max: 12,
+    },
+    city: {
+        label: "City",
+        type: String,
+        max: 120,
+    },
+    country: {
+        label: "Country",
+        type: String,
+    },
+});
+
+
+Schema.CustomPlan = new SimpleSchema({
+    base : {
+        type: Number,
+        label: "Base (regular monthly fee)",
+        autoform: {
+            placeHolder: "ex: 19",
+        },
+        defaultValue: 19,
+        optional: true,
+    },
+
+    instanciationUnitPrice : {
+        type: Number,
+        label: "Price per instanciation",
+        autoform: {
+            placeHolder: "ex: 0.01",
+        },
+        defaultValue: 0.01,
+        optional: true,
+    },
+
+    currency : {
+        label: "currency",
+        type: String,
+        allowedValues: ["euro", "usd"],
+        optional: true,
+        autoform: {
+            options: [
+                { value: "euro", label: "€" },
+                { value: "usd", label: "$"  }
+            ]
+        }
+    },
+
+    VAT : {
+        label: "VAT (0.2 default)",
+        type: Number,
+        autoform: {
+            placeHolder: "ex: 0.2",
+        },
+        defaultValue: 0.2,
+        optional: true,
+    }
+});
+
+Schema.User = new SimpleSchema({
+    /*
+     *   User accounts must be manually admin-approved
+     */
+
+    validated: {
+        label: "Account validated",
+        type: Boolean,
+        defaultValue: false,
+    },
+
+    /*
+     *   User plan
+     */
+
+    plan: {
+        label: "The user plan",
+        type: String,
+        defaultValue: "no plan",
+        autoform: {
+            omit: true,
+        },
+        allowedValues: ["no plan", "startup", "pro", "enterprise", "custom"],
+        autoform: {
+            options: [
+                { value: "no plan", label: "No plan" },
+                { value: "startup", label: "Startup: 19€/month + 0.03€/i" },
+                { value: "pro", label: "Pro: 99€/month + 0.02€/i" },
+                { value: "enterprise", label: "Enterprise: 399€/month + 0.01€/i" },
+                { value: "custom", label: "Custom"  }
+            ]
+        }
+    },
+
+    customPlan : {
+        label: "the user custom plan",
+        type: Schema.CustomPlan,
+        optional: true,
+    },
+
+
+    /*
+     *   Billing infos
+     */
+    VAT : {
+        label: "VAT value (from 0 to 1)",
+        type: Number,
+        defaultValue: 0.2,
+    },
+
+    VATPolicy : {
+        label: "VAT Policy",
+        type: String,
+        allowedValues: [ "fr", "eu", "non-eu" ],
+        defaultValue: "fr",
+        autoform: {
+            options: [
+                { value: "fr", label: "French VAT Policy" },
+                { value: "eu", label: "EU VAT Policy" },
+                { value: "non-eu", label: "Outside of EU VAT Policy" },
+            ]
+        }
+    },
+
+    VATIntracomm: {
+        label: "VAT number",
+        type: String,
+        optional: true,
+    },
+
+    billingAddress : {
+        label: "Billing Address",
+        type: Schema.Address,
+        optional: true,
+    },
+
+    /*
+     *   Base infos
+     */
+
+    emails: {
+        type: Array,
+        // For accounts-password, either emails or username is required, but not both. It is OK to make this
+        // optional here because the accounts-password package does its own validation.
+        // Third-party login packages may not require either. Adjust this schema as necessary for your usage.
+        optional: true
+    },
+
+    "emails.$": {
+        type: Object
+    },
+
+    "emails.$.address": {
+        type: String,
+        regEx: SimpleSchema.RegEx.Email
+    },
+
+    "emails.$.verified": {
+        label: "Email verified",
+        type: Boolean
+    },
+
+    createdAt: {
+        type: Date
+    },
+
+    profile: {
+        type: Schema.UserProfile,
+        optional: true,
+    },
+
+    // Make sure this services field is in your schema if you're using any of the accounts packages
+    services: {
+        type: Object,
+        optional: true,
+        blackbox: true
+    },
+
+    // Add `roles` to your schema if you use the meteor-roles package.
+    // Roles.addUsersToRoles(userId, ["admin"], Roles.GLOBAL_GROUP);
+    // You can't mix and match adding with and without a group since
+    // you will fail validation in some cases.
+    roles: {
+        type: Object,
+        optional: true,
+        blackbox: true
+    },
+
+    // In order to avoid an 'Exception in setInterval callback' from Meteor
+    heartbeat: {
+        type: Date,
+        optional: true
+    },
+});
+Meteor.users.attachSchema(Schema.User);
+Meteor.users.helpers({
+    email : function() {
+        if( this.emails && this.emails[0] ) {
+            return this.emails[0].address;
+        }
+        else {
+            return "[no mail]";
+        }
+    },
+
+    emailVerified : function() {
+        return this.emails && this.emails[0] && this.emails[0].verified;
+    },
+
+    isValidated: function() {
+        return this.validated;
+    },
+
+    displayName : function() {
+        if( this.profile !== undefined && this.profile.firstName !== undefined && this.profile.lastName !== undefined ) {
+            return this.profile.firstName + " " + this.profile.lastName;
+        }
+        else {
+            return this.emails[0].address;
+        }
+    },
+
+    getRoles: function() {
+        if( this && this.roles && this.roles["dualbox"] ) {
+            return this.roles["dualbox"];
+        }
+        else {
+            return [];
+        }
+    },
+});
+
+
+/*
+ *   Invoices.
+ *   It's kind of a "snapshot" of a situation of a user, with plan, instanciations, VAT stuff for a specific month
+ */
+Invoices = new Mongo.Collection("Invoices");
+Schema.Invoices = new SimpleSchema({
+    year : {
+        label: "year",
+        type: Number,
+    },
+
+    month : {
+        label: "month",
+        type: Number,
+        autoform: {
+            options: [
+                { value: 0, label: "January" },
+                { value: 1, label: "February" },
+                { value: 2, label: "March" },
+                { value: 3, label: "April" },
+                { value: 4, label: "May" },
+                { value: 5, label: "June" },
+                { value: 6, label: "July" },
+                { value: 7, label: "August" },
+                { value: 8, label: "September" },
+                { value: 9, label: "October" },
+                { value: 10, label: "November" },
+                { value: 11, label: "December" },
+            ]
+        }
+    },
+
+    // The invoice number
+    invoiceBase : {
+        label: "Invoice counter base",
+        type: String,
+        defaultValue: "DB2018",
+    },
+
+    invoiceNumber : {
+        label: "Invoice number",
+        type: Number,
+    },
+
+    // The user plan at the time of this invoice
+    plan: {
+        label: "The user plan",
+        type: String,
+        defaultValue: "no plan",
+        allowedValues: ["no plan", "startup", "pro", "enterprise", "custom"],
+        autoform: {
+            options: [
+                { value: "no plan", label: "No plan" },
+                { value: "startup", label: "Startup: 19€/month + 0.03€/i" },
+                { value: "pro", label: "Pro: 99€/month + 0.02€/i" },
+                { value: "enterprise", label: "Enterprise: 399€/month + 0.01€/i" },
+                { value: "custom", label: "Custom"  }
+            ]
+        }
+    },
+
+    planPriceTF : {
+        label: "The plan price (tax free)",
+        type: Number,
+    },
+
+    instanciationsNumber : {
+        label: "Number of apps instanciations",
+        type: Number,
+    },
+
+    instanciationUnitPriceTF : {
+        label: "Price per instanciation (tax free)",
+        type: Number,
+    },
+
+    VATPolicy : {
+        label: "VAT Policy",
+        type: String,
+        allowedValues: [ "fr", "eu", "non-eu" ],
+        defaultValue: "fr",
+        autoform: {
+            options: [
+                { value: "fr", label: "French VAT Policy - charge VAT" },
+                { value: "eu", label: "EU VAT Policy - dont charge VAT" },
+                { value: "non-eu", label: "Outside of EU - dont charge VAT" },
+            ]
+        }
+    },
+
+    VAT : {
+        label: "VAT value (from 0 to 1)",
+        type: Number,
+        defaultValue: 0.2,
+    },
+
+    VATIntracomm: {
+        label: "VAT number",
+        type: String,
+        optional: true,
+    },
+    date : {
+        label: "Invoice date",
+        type: Date,
+    },
+
+    billingAddress : {
+        label: "Billing Address",
+        type: Schema.Address,
+        optional: true,
+    },
+
+    // for showing invoice
+    // - pricePlanTF            : price of the plan
+    // - priceInstanciationsTF  : price of all instanciations
+    // - priceTF                : sum of price (tf)
+    // - priceVAT
+    // - price
+    prices : {
+        type: Object,
+        blackbox: true,
+    },
+
+    // true if the invoice is available to user
+    published : {
+        label: "Published",
+        type: Boolean,
+        defaultValue: false
+    },
+
+    // true if a notification has been sent
+    notificationSent : {
+        type: Boolean,
+        defaultValue: false,
+    }
+});
+Schema.Invoices.extend(Schema.Default);
+Invoices.attachSchema(Schema.Invoices);
+Invoices.helpers({
+    getInvoiceNumber : function() {
+        return this.invoiceBase + pad(this.invoiceNumber, 8);
+    },
+
+    getLink : function() {
+        return Meteor.absoluteUrl('invoice/' + this._id);
+    },
+
+    getMonthString : function() {
+        console.log('Month: ' + this.year + "-" + pad(this.month+1, 2) + "-01T12:00:00");
+        return moment(this.year + "-" + pad(this.month+1, 2) + "-01T12:00:00").format('MMMM YYYY');
+    },
+
+    getMoment : function() {
+        return moment(this.year + "-" + pad(this.month+1, 2) + "-01T12:00:00");
+    },
+});
+
+

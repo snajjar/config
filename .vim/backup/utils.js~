@@ -1,0 +1,85 @@
+/**
+ *  Utility function to create a drag image from a dom element
+ */
+
+import swal from 'sweetalert2';
+
+(function($) {
+    var isIE =  (typeof document.createElement("span").dragDrop === "function");
+    $.fn.customDragImage = function(options) {
+
+        var offsetX = options.offsetX || 0,
+            offsetY = options.offsetY || 0;
+
+        var createDragImage = function($node, x, y) {
+            var $img = $(options.createDragImage($node));
+            $img.css({
+                "top": Math.max(0, y-offsetY)+"px",
+                "left": Math.max(0, x-offsetX)+"px",
+                "position": "absolute",
+                "pointerEvents": "none"
+            }).appendTo(document.body);
+
+            setTimeout(function() {
+                $img.remove();
+            });
+
+            return $img[0];
+        };
+
+        if (isIE) {
+            $(this).on("mousedown", function(e) {
+                var originalEvent = e.originalEvent,
+                    node = createDragImage($(this), originalEvent.pageX, originalEvent.pageY);
+
+                node.dragDrop();
+            });
+        }
+
+        $(this).on("dragstart", function(e) {
+
+           var originalEvent = e.originalEvent,
+               dt = originalEvent.dataTransfer;
+
+            if (typeof dt.setDragImage === "function") {
+                node = createDragImage($(this), originalEvent.pageX, originalEvent.pageY);
+                dt.setDragImage(node, offsetX, offsetY);
+            }
+        });
+
+        return this;
+    };
+})($);
+
+showError = function(msg, title) {
+    swal({
+        msg: msg,
+        title: title,
+        type: "error"
+    });
+}
+
+
+// Set the right tab according to hash localtion (www.example.com/page#hash)
+setSelectedTab = function(cb) {
+    var link = $('a[data-toggle="tab"][href="' + window.location.hash + '"]');
+    if( link[0] ) {
+        link.click();
+        cb();
+    }
+    else {
+        setTimeout(setSelectedTab, 0);
+    }
+}
+
+setSelectedNav = function(cb) {
+    var link = $('a.nav-link[href="' + window.location.hash + '"]');
+    if( link[0] ) {
+        link.click();
+        cb();
+    }
+    else {
+        setTimeout(setSelectedTab, 0);
+    }
+}
+

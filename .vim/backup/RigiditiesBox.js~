@@ -1,0 +1,214 @@
+import { env, UIComponent, $} from '@dualbox/dualbox';
+import { _ } from 'lodash';
+
+var pkgDesc = require('../package.json');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./RigiditiesBox.css'); // for bundle compilation
+}
+
+/**
+ *  Attributes in appDesc :
+ *  text : text of the button
+ *  id : html id
+ */
+class RigiditiesBox extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.attr = {};
+        this.val = {};
+        this.zoneDef = ["E","Dx","Dy","Dz","C","Fx","Fy","CenterH","Bx","By","Bz","G","CenterB","A"];
+        this.otherInsoleData = null;
+
+        var that = this;
+        Object.keys(pkgDesc.dualbox.attr).forEach(function (key) {
+            that.attr[key] = appDesc.attr[key] !== undefined ? appDesc.attr[key]  : pkgDesc.dualbox.attr[key].value;
+        });
+
+        this.attr.footSizeStr = this.attr.footSizeStr || "Pointure";
+        this.attr.footWidthStr = this.attr.footWidthStr || "Gabarit";
+        this.attr.widthStr = this.attr.widthStr || "Epaisseur";
+        this.attr.recessStr = this.attr.recessStr || "Evidem. talon";
+        this.attr.linkTxt = this.attr.linkTxt || "Voir l'autre semelle";
+    }
+
+    registerEvents() {
+        super.registerEvents();
+        this.registerUIEvent("setOtherInsoleData", this.setOtherInsoleData.bind(this));
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+    }
+
+    hide(){
+        $(this.div).hide();
+    }
+
+    show(){
+        $(this.div).show();
+    }
+
+    setOtherInsoleData(data){
+        this.otherInsoleData = data.args;
+        this.addOtherInsoleInfos(data.args);
+    }
+
+    addOtherInsoleInfos(data) {
+        var content = `<div class="rigidity-widget rigidity-widget-${data.footside}">
+        <img id="zone-img" style="height: 370px; float: right; margin-bottom: 10px;" src=${require('./zones.png')}>
+        <span class="zone" style="display: block;" data-zone="E">${data.rigidities.E}</span>
+        <span class="zone" style="display: block;" data-zone="Dx">${data.rigidities.Dx}</span>
+        <span class="zone" style="display: block;" data-zone="Dy">${data.rigidities.Dy}</span>
+        <span class="zone" style="display: block;" data-zone="Dz">${data.rigidities.Dz}</span>
+        <span class="zone" style="display: block;" data-zone="C">${data.rigidities.C}</span>
+        <span class="zone" style="display: block;" data-zone="Fx">${data.rigidities.Fx}</span>
+        <span class="zone" style="display: block;" data-zone="Fy">${data.rigidities.Fy}</span>
+        <span class="zone" style="display: block;" data-zone="CenterH">${data.rigidities.CenterH}</span>
+        <span class="zone" style="display: block;" data-zone="Bx">${data.rigidities.Bx}</span>
+        <span class="zone" style="display: block;" data-zone="By">${data.rigidities.By}</span>
+        <span class="zone" style="display: block;" data-zone="Bz">${data.rigidities.Bz}</span>
+        <span class="zone" style="display: block;" data-zone="G">${data.rigidities.G}</span>
+        <span class="zone" style="display: block;" data-zone="CenterB">${data.rigidities.CenterB}</span>
+        <span class="zone" style="display: block;" data-zone="A">${data.rigidities.A}</span>
+    </div>
+    <div class="row" style="margin-top: 20px;">
+        <div style="padding-left: 10px; padding-right: 10px;">
+            <table class="rigidity-widget-table">
+                <tr><td nowrap="">${this.attr.footSizeStr}</td><td style="text-align: right;">${data.footsize}</td></tr>
+                <tr><td nowrap="">${this.attr.footWidthStr}</td><td style="text-align: right;">${data.footwidth}</td></tr>
+                <tr><td nowrap="">${this.attr.widthStr}</td><td style="text-align: right;">${data.thickness}</td></tr>
+                <tr><td nowrap="">${this.attr.recessStr}</td><td style="text-align: right;">${data.recess}</td></tr>
+            </table>
+        </div>
+    </div>`
+
+        var otherInsoleInfos = $('<div/>', {
+            "class": "other-insole-infos",
+            "style": "text-align: center;"
+        }).append($('<hr/>'))
+          .append(
+              $('<a/>', {
+                  "role"  : "button",
+                  "href"  : "#",
+                  "class" : "other-insole-link",
+                  "style" : "text-align: center; cursor: pointer;",
+                  "data-toggle" : "popover",
+                  "data-placement" : "left",
+                  "data-trigger" : "focus",
+                  "title" : this.attr.linkTxt,
+                  "data-html" : true,
+                  "data-original-title" : this.attr.linkTxt,
+                  "data-content" : content,
+              }).append(this.attr.linkTxt)
+          );
+
+        $(this.div).append(otherInsoleInfos);
+        $('a.other-insole-link').popover({ 'container' : 'body' }); // initialize the popover button
+    }
+
+    import( rig ) {
+        this.val = rig;
+        _.each( this.zoneDef, (zone) =>  {
+            $(this.div).find('input[data-zone="' + zone + '"]').val( rig[zone] );
+        });
+    }
+
+    onReady() {
+        // check our inputs to see if we're on the right or the left foot
+        var side = this.inputValue['footSide'];
+        if( side == "left" ) {
+            this.rigidityWidget.removeClass('rigidity-widget-right').addClass('rigidity-widget-left');
+        }
+        else {
+            this.rigidityWidget.removeClass('rigidity-widget-right').addClass('rigidity-widget-left');
+        }
+
+        // send data
+        this.emit('data', { "rigidities" : this.val });
+    }
+
+    onChange(zone) {
+        var input = $(this.div).find('input[data-zone="' + zone + '"]');
+        var val = input.val();
+        val = parseInt(val, 10);
+
+        if( val < 2 ) {
+            input.val(2);
+        }
+        else if( val > 7 ) {
+            input.val(7);
+        }
+        else {
+            this.val[zone] = parseInt(val, 10);
+            this.trigger({ "rigidities" : this.val });
+        }
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var component = new RigiditiesBox(pkgDesc, appDesc, attrs);
+
+        var attr = appDesc.attr || {};
+
+        // instanciate zones
+        var zoneInputs = [];
+        _.each(component.zoneDef, function(zone) {
+            // create input
+            var input = $('<input/>', {
+                "data-zone" : zone,
+                "class" : "zone",
+                "type"  : "number",
+                "min"   : "2",
+                "value" : "2",
+                "max"   : "7",
+                "style" : "display: inline-block;"
+            });
+
+            // bind it to onChange
+            input.on('change', component.onChange.bind(component, zone));
+
+            // init our value to 2 for this zone
+            component.val[zone] = 2;
+
+            // push it
+            zoneInputs.push(input);
+        });
+
+        // add zones to our link
+        var link = $('<a/>', {
+            "data-toggle" : "tooltip",
+            "data-placement" : "left",
+            "data-html" : true,
+            "title" : attr.titletip,
+            "data-original-title" :"<p style='text-align: left;'>"+ attr.helptip
+        }).append(
+            $('<img/>', {
+                "id" : "zone-img",
+                "style" : "max-width: 100%; min-height: 370px;",
+                "src"   : require('./zones.png')
+            })
+        );
+        _.each(zoneInputs, function(input) {
+            link.append(input);
+        });
+
+        component.rigidityWidget = $('<div/>', {
+            class: 'rigidity-widget rigidity-widget-right',
+        }).append(link);
+
+        // instanciate div from app.json parameters
+        component.div = $('<div>').append(component.rigidityWidget);
+
+        // append to param div and return the slider
+        $(div).append(component.div);
+        return component;
+    }
+}
+
+module.exports = RigiditiesBox;

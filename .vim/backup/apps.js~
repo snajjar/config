@@ -1,0 +1,852 @@
+import { Template } from 'meteor/templating';
+import { _ } from 'lodash';
+import swal from 'sweetalert2'
+
+////////////////////////////////////////////////////
+//  AppsPage
+//  page that display all applications groups
+////
+
+Template.AppsPage.onCreated(function() {
+    // subscribe to user applications
+    this.autorun(() => {
+        subMgr.subscribe('user_Apps');
+        subMgr.subscribe('user_AppVersions');
+    });
+});
+
+Template.AppsPage.helpers({
+    getApps : function() {
+        return Apps.find().fetch();
+    }
+});
+
+Template.AppsPage.events({
+    'click .link-to-dashboard' : function(e, t) {
+        Router.go('DashboardPage');
+    },
+
+    'click .card-app' : function(e, t) {
+        Router.go('ApplicationPage', { "_appName" : this.name });
+    },
+
+    'click .card-new-app' : function(e, t) {
+        swal({
+            title: 'Choose a name for your application',
+            input: 'text',
+            showCancelButton: true,
+            confirmButtonText: 'Set this name',
+            showLoaderOnConfirm: true,
+            preConfirm: (name) => {
+                return new Promise((resolve) => {
+                    Meteor.call('checkAppNameAvailable', name, function(err, result) {
+                        if( !result ) {
+                            // app name is taken
+                            swal.showValidationError('This application name is already taken.')
+                        }
+                        resolve();
+                    });
+                })
+            },
+            allowOutsideClick: () => !swal.isLoading()
+        }).then((result) => {
+            // new app name isnt taken
+            if( result.value ) {
+                Apps.insert({ name: result.value }, function(err) {
+                    if( err ) {
+                        swal('Oh oh.', err.message, "error");
+                    }
+                    else {
+                        swal("App created !", "", "success").then(() => {
+                            Router.go('ApplicationPage', { _appName : result.value });
+                        });
+                    };
+                });
+            }
+        })
+    },
+});
+
+
+////////////////////////////////////////////////////
+//  AppsCard
+//  Template that display an application card
+////
+
+Template.AppCard.onCreated(function() {
+    this.autorun(() => {
+        var phases = this.data.phases;
+        _.each(phases, (id, name) => {
+            subMgr.subscribe('select_AppVersions', { '_id' : id });
+        });
+    });
+});
+
+Template.AppCard.helpers({
+    showPhase : function(p) {
+        var versionId = this.phases[p];
+        if( versionId ) {
+            var version = AppVersions.findOne(versionId);
+            if( version ) {
+                switch(version.deployStatus) {
+                    case "Not deployed":
+                    case "In queue":
+                    case "building...":
+                    case "built":
+                        return '<span class="text-orange"><i class="fa fa-wrench fa-spin"></i> ' + version.appVersion + '</span>';
+
+                    case "error":
+                        return '<span class="text-red"><i class="fa fa-exclamation-triangle"></i> ' + version.appVersion + '</span>';
+
+                    case "deployed":
+                        return '<span class="text-green"><i class="fa fa-cloud-upload"></i> ' + version.appVersion + '</span>';
+                    default:
+                        return '<span class="text-red">error</span>';
+                }
+            }
+        }
+        return '<span class="text-muted"><i class="fa fa-circle-o"></i></span>';
+    },
+});
+
+////////////////////////////////////////////////////
+//  Application Page
+//  page to manage an application
+////
+
+Template.ApplicationPage.onCreated(function() {
+
+    // subscribe to user applications
+    this.autorun(() => {
+        this.name = Template.currentData().appName;
+        subMgr.subscribe('user_Apps', { name : this.name });
+        subMgr.subscribe('user_AppVersions', { appName : this.name });
+    });
+});
+
+Template.ApplicationPage.onRendered(function() {
+    // set a hash when we click on a tab, to load the right tab directly on F5
+    var self = this;
+
+    // load the tab that is set right now
+    if( window.location.hash ) {
+        setSelectedTab();
+    }
+});
+
+Template.ApplicationPage.helpers({
+    getApp : function() {
+        return Apps.findOne({ name: Template.instance().name });
+    },
+
+    emptyApp : function() {
+        return Apps.findOne({ name: Template.instance().name }) === undefined;
+    },
+
+    showDate : function() {
+        return moment(this.createdAt).calendar();
+    },
+
+    isDeployedPhase: function(p) {
+        return  this.phases[p] !== undefined && this.phases[p] !== null;
+    },
+
+    getVersionFromPhase: function(p) {
+        var versionId = this.phases[p];
+        if( versionId ) {
+            var version = AppVersions.findOne(versionId);
+            if( version ) return version;
+        }
+        return {};
+    },
+
+    getVersions: function() {
+        return AppVersions.find({ appName: Template.instance().name }).fetch();
+    },
+});
+
+Template.ApplicationPage.events({
+    "click .link-to-apps" : function(e, t) {
+        e.preventDefault();
+        Router.go('AppsPage');
+    },
+
+    "click .app-edit-name" : function(e, t) {
+        var name = this.name;
+
+        swal({
+            title: 'Are you sure?',
+            text: 'We don\'t recommand using name change if your application is in use. The existing links will be broken and replaced by new ones !',
+            type: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, change name !',
+            cancelButtonText: 'Abort',
+        }).then( (confirmed) => {
+            if( confirmed ) {
+                swal({
+                    title: 'Choose a new name for the application',
+                    input: 'text',
+                    showCancelButton: true,
+                    confirmButtonText: 'Set this name',
+                    showLoaderOnConfirm: true,
+                    preConfirm: (name) => {
+                        return new Promise((resolve) => {
+                            Meteor.call('checkAppNameAvailable', name, function(err, result) {
+                                if( !result ) {
+                                    // app name is taken
+                                    swal.showValidationError('This application name is already taken.')
+                                }
+                                resolve();
+                            });
+                        })
+                    },
+                    allowOutsideClick: () => !swal.isLoading()
+                }).then((result) => {
+                    // new app name isnt taken
+                    if( result.value ) {
+                        Meteor.call('renameApp', name, result.value, function(err) {
+                            if( err ) {
+                                swal({
+                                  type: 'error',
+                                  title: 'Could not rename your app',
+                                  html: 'reason: <p style="color: red">' + err.message + '</p>'
+                                })
+                            }
+                            else {
+                                swal({
+                                  type: 'success',
+                                  title: 'Rename success!',
+                                  html: 'Your app has been renamed to ' + result.value + '.'
+                                }).then(() => {
+                                    Router.go('ApplicationPage', { "_appName" : result.value });
+                                });
+                            }
+                        });
+                    }
+                })
+            }
+        });
+    },
+
+    "click .app-edit-description" : function(e, t) {
+        $('.app-description-text').hide();
+        $('.app-description-edit').show();
+    },
+
+
+    "click .app-save-description" : function(e, t) {
+        var description = $('.app-description-input').val();
+        var app = Apps.findOne({ 'name': this.name });
+        if( app ) {
+            Apps.update(app._id, { $set: { 'description' : description }});
+            $('.app-description-text').show();
+            $('.app-description-edit').hide();
+        }
+    },
+
+    "click .btn-delete-app" : function(e, t) {
+        var name = this.name;
+        var id = this._id;
+        swal({
+            title: 'I hope you know what you\'re doing.',
+            html: 'This will delete <i>' + name + '</i> and <b>all versions of it</b>.<p class="mt-3 mb-3" style="color: red;">BACKUP WILL NOT BE POSSIBLE</span>.',
+            type: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, delete it!',
+            confirmButtonColor: '#d33',
+            cancelButtonText: 'Abort',
+        }).then( (confirmed) => {
+            if( confirmed ) {
+                swal({
+                    title: 'Please enter the name of the application to confirm',
+                    input: 'text',
+                    type: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Delete this application',
+                    confirmButtonColor: '#d33',
+                    showLoaderOnConfirm: true,
+                }).then((result) => {
+                    // new app name isnt taken
+                    if( result.value ) {
+                        if( result.value === name ) {
+                            Meteor.call('deleteApplication', id, function(err) {
+                                if( err ) {
+                                    swal({
+                                      type: 'error',
+                                      title: 'Could not delete app',
+                                      html: 'reason: <p style="color: red">' + err.message + '</p>'
+                                    })
+                                }
+                                else {
+                                    swal({
+                                      type: 'success',
+                                      title: 'delete success!',
+                                      html: 'Your app has been deleted.'
+                                    }).then(() => {
+                                        Router.go('AppsPage');
+                                    });
+                                }
+                            });
+                        }
+                        else {
+                            swal({
+                                title: "confirmation failed",
+                                text: "The application wasn\'t deleted.",
+                                type: "error"
+                            });
+                        }
+                    }
+                })
+            }
+        });
+
+    },
+
+    "click a[data-toggle='tab']" : function(e, t) {
+        e.preventDefault()
+        $(e.target).tab('show')
+        var target = $(e.target).attr("href") // activated tab
+        var tab = target.substr(1);
+        window.location.hash = target;
+    },
+
+    "dragstart .card-version" : function(e, t) {
+        $(e.target).addClass('dragged');
+        $('.card-phase').addClass('droppable');
+        e.originalEvent.dataTransfer.setData('version', $(e.target).attr('data-version'));
+    },
+
+    "dragend .card-version" : function(e, t) {
+        $(e.target).removeClass('dragged');
+        $('.card-phase').removeClass('droppable');
+    },
+
+    "dragenter .card-phase" : function(e, t) {
+        var phaseDiv = $(e.target).closest('.card-phase');
+        var dragCount = phaseDiv.data('dragCount') || 0;
+        dragCount++;
+        $(phaseDiv).data('dragCount', dragCount);
+        $(phaseDiv).addClass('dropready');
+    },
+
+    "dragover .card-phase" : function(e, t) {
+        e.stopPropagation();
+        e.preventDefault();
+    },
+
+    "dragleave .card-phase" : function(e, t) {
+        var phaseDiv = $(e.target).closest('.card-phase');
+        var dragCount = phaseDiv.data('dragCount') || 0;
+        dragCount--;
+        $(phaseDiv).data('dragCount', dragCount);
+        if( dragCount == 0 ) {
+            $(phaseDiv).removeClass('dropready');
+        }
+    },
+
+    "drop .card-phase" : function(e, t) {
+        $('.card-phase').removeClass('dropready').data('dragCount', 0);
+        $(e.target).removeClass('dropready');
+
+        var self = this;
+        var versionName = e.originalEvent.dataTransfer.getData('version');
+        var phaseName = $(e.target).closest('.card-phase').attr("data-phase").toLowerCase();
+
+        var cleanInterface = function() {
+            $('.card-phase').removeClass('dropready').removeClass('droppable');
+            $('.card-version').removeClass('dragged');
+        }
+
+        swal({
+            title: "Deploy " + versionName + " to " + phaseName + "?",
+            type: "confirm",
+            showCancelButton: true,
+            closeOnConfirm: true,
+            type: "warning",
+        }).then((result) => {
+            if( result.value ) {
+                cleanInterface();
+
+                var app = Apps.findOne({ name: self.name });
+                var version = AppVersions.findOne({ appName: self.name, appVersion: versionName });
+
+                // update the phase of the app
+                var phases = app.phases || {};
+                phases[phaseName] = version._id;
+                Apps.update(app._id, { $set: { "phases" : phases }});
+            }
+        });
+    },
+
+    "click .card-new-version": function(e, t) {
+        e.preventDefault();
+        Router.go('VersionPage', { "_appName" : this.name, "_appVersion": "new" });
+    },
+});
+
+////////////////////////////////////////////////////
+//  Version Card
+//  Template that show a version on Application Page
+////
+Template.VersionCard.onCreated(function() {
+
+});
+
+Template.VersionCard.helpers({});
+Template.VersionCard.events({
+    "click a.link-to-version-page" : function(e, t) {
+        e.preventDefault();
+        Router.go('VersionPage', { "_appName" : this.appName, "_appVersion": this.appVersion });
+    },
+
+    "click a.link-to-build-error" : function(e, t) {
+        e.preventDefault();
+        Router.go('BuildErrorPage', { "_appName" : this.appName, "_appVersion": this.appVersion });
+    }
+});
+
+
+////////////////////////////////////////////////////
+//  Version Page
+//  page to manage/build a specific version of an app
+////
+
+Template.VersionPage.onCreated(function() {
+    this.editor = new ReactiveVar(null);
+
+    // subscribe to user applications
+    this.name = new ReactiveVar(this.data.appName);
+    this.version = new ReactiveVar(this.data.appVersion);
+    this.tabshown = new ReactiveVar('configuration');
+
+    this.autorun(() => {
+        subMgr.subscribe('user_Apps', { name : this.name.get() });
+        subMgr.subscribe('user_AppVersions', { appName : this.name.get() });
+    });
+});
+
+Template.VersionPage.onRendered(function() {
+    // create the editor
+    var self = this;
+
+    var setEditor = function() {
+        var editor = document.getElementById("json-editor");
+        if( editor ) {
+            self.editor.set(new JSONEditor(editor, {
+                mode: 'code',
+                modes: ['code', 'tree'],
+                onChange: function() {
+                    $('textarea [name="json"]').val( $(editor).get() );
+                },
+            }));
+
+            if( self.data.appVersion && self.data.appVersion != "new" ) {
+                self.autorun(function() {
+                    var version = AppVersions.findOne({ appName: self.data.appName, appVersion: self.data.appVersion });
+                    if( version ) {
+                        var editor = self.editor.get();
+                        editor.set(JSON.parse(version.json || "{}"));
+                        editor.setMode("code");
+                    }
+                });
+            }
+        }
+        else {
+            setTimeout(setEditor, 0);
+        }
+    }
+
+    this.autorun( () => {
+        if( subMgr.ready() ) {
+            setEditor();
+        }
+    });
+
+    // set a hash when we click on a tab, to load the right tab directly on F5
+    var self = this;
+    $('a[data-toggle="tab"]').click(function(e) {
+        e.preventDefault()
+        $(this).tab('show')
+        var target = $(e.target).attr("href") // activated tab
+        var tab = target.substr(1);
+        window.location.hash = target;
+        self.tabshown.set(tab);
+
+        /*
+        if( tab !== "#application" ) {
+            killApp();
+        }
+        */
+    });
+
+    // load the tab that is set right now
+    if( window.location.hash ) {
+        setSelectedTab();
+    }
+});
+
+Template.VersionPage.helpers({
+    getApp : function() {
+        return Apps.findOne({ name: Template.instance().name.get() });
+    },
+
+    emptyVersion: function() {
+        var app = Apps.findOne({ name: Template.instance().name.get() });
+        if( app === undefined ) return true;
+        return AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() }) === undefined;
+    },
+
+    isNewVersion: function() {
+        return Template.instance().version.get() === "new";
+    },
+
+    getFormType: function() {
+        return Template.instance().version.get() === "new" ? "insert" : "update";
+    },
+
+    getLastUpdate : function() {
+        return moment(this.updatedAt).calendar();
+    },
+
+    isCardHidden : function() {
+        return Template.instance().version.get() === "new" ? "card-hidden" : "";
+    },
+
+    // works only when editing, not for a new version
+    getVersion: function() {
+        if( Template.instance().version.get() !== "new" ) {
+            return AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() });
+        }
+        else {
+            return undefined;
+        }
+    },
+
+    isInPhases: function() {
+        var p = [];
+        var phaseNames = Object.keys(this.phases);
+        var version = AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() });
+        if( version ) {
+            var id = version._id;
+
+            for(var i=0; i<phaseNames.length; i++) {
+                if( id == this.phases[ phaseNames[i] ] ) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    },
+
+    getVersionPhases: function() {
+        var p = [];
+        var phaseNames = Object.keys(this.phases);
+        var version = AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() });
+        if( version ) {
+            var id = version._id;
+
+            for(var i=0; i<phaseNames.length; i++) {
+                if( id == this.phases[ phaseNames[i] ] ) {
+                    p.push( phaseNames[i] );
+                }
+            }
+
+            return p.join(' ');
+        }
+
+        return "";
+    },
+
+    getField : function( name ) {
+        if( Template.instance().version.get() !== "new" ) {
+            var version = AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() });
+            return version[name];
+        }
+        else {
+            return false;
+        }
+    },
+
+    otherVersions : function() {
+        return AppVersions.find({ appName: this.appName }).fetch();
+    },
+});
+
+Template.VersionPage.events({
+    "click .link-to-versions" : function(e, t) {
+        e.preventDefault();
+        Router.go('ApplicationPage', { '_appName': this.name });
+    },
+
+    "change #version-settings-form .form-control" : function(e, t) {
+        $('.btn-submit-version-settings-form').prop('disabled', false);
+    },
+
+    "click .json-import" : function(e, t) {
+        var versionFrom = $(e.target).val();
+        console.log('Importing JSON from version ' + versionFrom);
+
+        var version = AppVersions.findOne({ appName: this.appName, appVersion: versionFrom });
+        if( version ) {
+            var editor = Template.instance().editor.get();
+            editor.set( JSON.parse(version.json) );
+        }
+    },
+});
+
+// on form submit
+AutoForm.addHooks('version-settings-form', {
+    onSuccess : function(formType, result) {
+        $('.btn-submit-version-settings-form').prop('disabled', true);
+
+        var modifiers = formType == "insert" ? this.insertDoc : this.updateDoc.$set;
+        var t = this.template.findParent('VersionPage');
+        t.name.set(modifiers.appName);
+        t.version.set(modifiers.appVersion);
+
+        if( formType == "insert" ) {
+            Router.go('VersionPage', {
+                '_appName' : modifiers.appName,
+                '_appVersion' : modifiers.appVersion
+            });
+        }
+        return false;
+    },
+
+    onError : function(formType, result) {
+        swal('Error', result, 'error');
+    }
+});
+
+// on form submit
+AutoForm.addHooks('version-code-form', {
+    before : {
+        "insert" : function(doc) {
+            var json = Template.instance().findParent("VersionPage").editor.get().get();
+            doc.json = JSON.stringify(json);
+            return doc;
+        },
+
+        "update": function(doc) {
+            // get the json string from the template
+            var t = this.template.findParent("VersionPage");
+            var json = t.editor.get().get();
+            doc.$set.json = JSON.stringify(json || {});
+
+            var version = AppVersions.findOne({ appName: t.name.get(), appVersion: t.version.get() });
+
+            return doc;
+        },
+    },
+
+    onSuccess : function(formType, result) {
+        var appName = formType == "insert" ? this.insertDoc.appName : this.updateDoc.$set.appName;
+        Router.go('ApplicationPage', { '_appName' : appName });
+        Meteor.call('deployVersion', this.docId, function(err, r) {
+            if( err ) {
+                swal('Error deploying version', err.reason, "error");
+            }
+        });
+        return false;
+    },
+
+    onError : function(formType, result) {
+        swal('Error', result, 'error');
+    }
+});
+
+////////////////////////////////////////////////////
+//  Build Error Page
+//  Page that display build errors
+////
+
+Template.BuildErrorPage.onCreated(function() {
+    // subscribe to user applications
+    this.name = new ReactiveVar(this.data.appName);
+    this.version = new ReactiveVar(this.data.appVersion);
+
+    this.autorun( () => {
+        subMgr.subscribe('user_Apps', { name : this.name.get() });
+        subMgr.subscribe('user_AppVersions', { appName : this.name.get(), appVersion: this.version.get() });
+    });
+});
+
+Template.BuildErrorPage.helpers({
+    getApp : function() {
+        return Apps.findOne({ name: Template.instance().name.get() });
+    },
+
+    // works only when editing, not for a new version
+    getVersion: function() {
+        return AppVersions.findOne({ appName: Template.instance().name.get(), appVersion: Template.instance().version.get() });
+    },
+});
+
+Template.BuildErrorPage.events({
+    "click .link-to-version-page" : function(e, t) {
+        e.preventDefault();
+        Router.go('VersionPage', { "_appName" : t.name.get(), "_appVersion": t.version.get() });
+    },
+});
+
+
+////////////////////////////////////////////////////
+//  Show Version Template
+//  Instanciate a DualBox App Version
+////
+
+Template.ShowVersion.onCreated(function() {
+    this.autorun(function() {
+        var data = Template.currentData();
+        if( data ) {
+            subMgr.subscribe('select_Apps', { 'name' : data.appName });
+            subMgr.subscribe('select_AppVersions', { 'appName' : data.appName, 'appVersion': data.appVersion });
+        }
+    });
+});
+
+Template.ShowVersion.onRendered(function() {
+    var self = this;
+    this.loaded = false;
+    this.autorun(function() {
+        var data = Template.currentData();
+        if( data ) {
+            var version = AppVersions.findOne({ 'appName': data.appName, 'appVersion': data.appVersion });
+            if( version !== undefined ) {
+                // define the load app function
+                self.load = function() {
+                    if( !self.loaded ) {
+                        var loadApp = function() {
+                            DualBox.load({
+                                "app"  : data.appName,
+                                "version": data.appVersion,
+                                "loaderDiv": $('#dualbox-app'),
+                                "endpoint": Meteor.absoluteUrl()
+                            }, function() {
+                                window.app = DualBox.start({
+                                    "logLevel": "warn",
+                                    "profiler": "false",
+                                    "div" : $('#dualbox-app'),
+                                });
+                                window.app.start();
+                            });
+                        }
+
+                        if( window.DualBox ) {
+                            // loadapp.js has already been added
+                            loadApp();
+                        }
+                        else {
+                            (function(callback) {
+                                var s = document.createElement('script');
+                                s.setAttribute( 'src', Meteor.absoluteUrl("loadapp.js"));
+                                s.onload=callback; document.body.appendChild( s );
+                            })(function() {
+                                loadApp();
+                            });
+                        }
+
+                        self.loaded = true;
+                    }
+                }
+
+                var versionTemplate = self.findParent('VersionPage');
+                if( versionTemplate ) {
+                    if( versionTemplate.tabshown.get() == "application" ) {
+                        $('#dualbox-app').ready(() => {
+                            self.load();
+                        });
+                    }
+                }
+                else {
+                     $('#dualbox-app').ready(() => {
+                         self.load();
+                     });
+                }
+            }
+        }
+    });
+});
+
+killApp = function() {
+    if( window.app ) {
+        window.app.kill();
+        delete window.app;
+    }
+    $('#dualbox-app').empty();
+}
+
+Template.ShowVersion.onDestroyed(function() {
+    killApp();
+});
+
+////////////////////////////////////////////////////
+//  ApplicationPhasePage
+//  Page that shows an app for the selected phase
+//  (dev, alpha, beta, production)
+////
+Template.ApplicationPhasePage.onCreated(function() {
+    var self = this;
+    this.autorun(() => {
+        var data = Template.currentData();
+        if( data ) {
+            this.appName = this.data._appName;
+            this.appPhase = this.data._appPhase;
+
+            subMgr.subscribe('Apps_by_name', data.appName, function() {
+                var app = Apps.findOne({ 'name' : data.appName });
+                if( app && app.phases ) {
+                    self.versionId = app.phases[data.appPhase];
+                    subMgr.subscribe('AppVersions_by_id', self.versionId);
+                }
+            });
+        }
+    });
+});
+
+Template.ApplicationPhasePage.helpers({
+    getVersion : function() {
+        return AppVersions.findOne();
+    }
+});
+
+
+
+////////////////////////////////////////////////////
+//  AppsBuildingPage
+//  Page that all apps/versions currently building
+////
+Template.AppsBuildingPage.onCreated(function() {
+    var self = this;
+    this.targetStatus = new ReactiveVar('building...');
+    this.autorun(() => {
+        subMgr.subscribe('select_AppVersions', { 'deployStatus': Template.instance().targetStatus.get() });
+    });
+});
+
+Template.AppsBuildingPage.helpers({
+    getVersions : function() {
+        return AppVersions.find(
+            { 'deployStatus': Template.instance().targetStatus.get() },
+            { sort : { updatedAt: -1, appName: 1, appVersion: 1 } }
+        ).fetch();
+    },
+
+    getLastUpdate: function() {
+        return moment(this.updatedAt).calendar();
+    }
+});
+
+
+Template.AppsBuildingPage.events({
+    "click .link-to-dashboard" : function(e, t) {
+        Router.go('DashboardPage');
+    },
+
+    "change .select-status" : function(e, t) {
+        t.targetStatus.set( $(e.target).val() );
+    }
+});
+
+

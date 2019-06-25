@@ -1,0 +1,459 @@
+<template name="AdminPage">
+    <div class="page page-full-height bg-white">
+        <h1 class="page-header">Admin</h1>
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-sm-2">
+                    <nav class="nav nav-pills flex-column">
+                        <p class="nav-separator">Management</p>
+                        <a class="nav-link active" href="#AdminUsers">Users</a>
+                        <a class="nav-link" href="#AdminInvoices">Invoices</a>
+                        <p class="nav-separator">Dev tools</p>
+                        <a class="nav-link" href="#AdminEmailTemplates">Emails Templates</a>
+                    </nav>
+                </div>
+                <div class="col-sm-10">
+                    {{> Template.dynamic template=getActiveTemplate }}
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template name="AdminUsers">
+    <div class="container-fluid">
+        <table class="table table-striped" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Email verified</th>
+                    <th>Account validated</th>
+                    <th>Configure link</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each getUsers}}
+                <tr>
+                    <td>{{email}}</td>
+                    <td>{{#if emailVerified}}<span class="text-success">YES</span>{{else}}<span class="text-danger">NO</span>{{/if}}</td>
+                    <td>{{#if isValidated}}<span class="text-success">YES</span>{{else}}<span class="text-danger">NO</span>{{/if}}</td>
+                    <td><a class="user-configure" target="_blank" href="/admin/user/{{_id}}/">Configure</a></td>
+                </tr>
+                {{/each}}
+            </tbody>
+        </table>
+    </div>
+</template>
+
+<template name="AdminEmailTemplates">
+    <div class="row mb-3">
+        <div class="col">
+            <select class="form-control select-template d-inline-block" style="width: 500px;">
+                <option value="verifyEmail">Email address confirmation</option>
+                <option value="resetPassword">Password reset</option>
+                <option value="invoiceNotification">Invoice Notification</option>
+            </select>
+            <select class="form-control select-type d-inline-block ml-3" style="width: 80px;">
+                <option value="html">html</option>
+                <option value="txt">txt</option>
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6">
+            <iframe class="show-email" style="width: 100%; height: 802px; border: 1px solid rgba(0,0,0,0.1);">
+                <html>
+                    <header></header>
+                    <body style="margin: 0;"></body>
+                </html>
+            </iframe>
+        </div>
+        <div class="col-md-6">
+            <label>Template Data</label>
+            <textarea class="form-control template-data" rows=20 style="min-width: 400px;">{{getTemplateData}}</textarea>
+            <button class="btn btn-secondary template-data-button mt-2">Update template data</button>
+        </div>
+    </div>
+</template>
+
+<template name="AdminUserConfigurationPage">
+    <div class="page bg-white">
+        {{#with getUser}}
+        <h1 class="page-header">Admin: <small>{{displayName}} configuration</small></h1>
+        {{/with}}
+
+        <div class="row">
+            <div class="col-md-3">
+                <div class="card user-config-card">
+                    <div class="card-header">Configuration</div>
+                    <div class="card-body">
+                        {{#autoForm collection="Meteor.users" id="user-config-form" type="update" doc=getUser}}
+                            <fieldset>
+                                {{> afQuickField name='emails.0.address' placeHolder="Email" class="form-control"}}
+                                {{> afQuickField name='emails.0.verified'}}
+                                {{> afQuickField name='validated'}}
+                            </fieldset>
+                            <button class="btn btn-primary" type="submit">Save</button>
+                        {{/autoForm}}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header">Plan</div>
+                    <div class="card-body">
+                        {{#autoForm collection="Meteor.users" id="user-plan-form" type="update" doc=getUser}}
+                            {{> afFieldInput name='plan'}}
+                            {{#if hasCustomPlan}}
+                                <fieldset class="mt-3" style="border: 1px solid rgba(0,0,0,0.1); padding: 15px;">
+                                    <h4>Configure custom plan</h4>
+                                    <hr/>
+                                    {{> afQuickField name='customPlan.base'}}
+                                    {{> afQuickField name='customPlan.instanciationUnitPrice'}}
+                                    {{> afQuickField name='customPlan.currency'}}
+                                    {{> afQuickField name='customPlan.VAT'}}
+                                </fieldset>
+                            {{/if}}
+                            <button class="btn btn-primary mt-3" type="submit">Save</button>
+                        {{/autoForm}}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">Billing Infos</div>
+                    <div class="card-body">
+                        {{#autoForm collection="Meteor.users" id="user-address-form" type="update" doc=getUser}}
+                            <fieldset class="mt-3" style="padding-left: 15px; padding-right: 15px;">
+                                <h4 class="mb-4">VAT settings</h4>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        {{> afQuickField name='VAT'}}
+                                    </div>
+                                    <div class="col-md-6">
+                                        {{>afQuickField name="VATIntracomm"}}
+                                    </div>
+                                    <div class="col-md-6">
+                                        {{>afQuickField name="VATPolicy"}}
+                                    </div>
+                                </div>
+                            </fieldset>
+                            <fieldset class="mt-3"  style="padding-left: 15px; padding-right: 15px;">
+                                <h4 class="mb-4">Billing Address</h4>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        {{> afQuickField name='billingAddress.dest'}}
+                                    </div>
+                                    <div class="col-md-6">
+                                        {{> afQuickField name='billingAddress.phone'}}
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        {{> afQuickField name='billingAddress.line1'}}
+                                        {{> afQuickField name='billingAddress.line2'}}
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        {{> afQuickField name='billingAddress.zipcode'}}
+                                    </div>
+                                    <div class="col-md-4">
+                                        {{> afQuickField name='billingAddress.city'}}
+                                    </div>
+                                    <div class="col-md-4">
+                                        {{> afQuickField name='billingAddress.country'}}
+                                    </div>
+                                </div>
+                            </fieldset>
+                            <button class="btn btn-primary mt-3" type="submit">Save</button>
+                        {{/autoForm}}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template name="AdminInvoices">
+    <select class="form-control select-month" style="max-width: 250px;">
+        {{#each getMonths}}
+        <option value="{{dateFormat this 'YYYY-MM'}}">{{dateFormat this 'MMMM YYYY'}}</option>
+        {{/each}}
+    </select>
+
+    <table class="table table-striped mt-3" style="width: 100%;">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Invoice edited</th>
+                <th>Invoice published</th>
+                <th>Invoice edition link</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#each getUsers}}
+            <tr>
+                <td>{{email}}</td>
+                <td>{{#if invoiceExists}}<span class="text-success">YES</span>{{else}}<span class="text-danger">NO</span>{{/if}}</td>
+                <td>{{#if invoicePublished}}<span class="text-success">YES</span>{{else}}<span class="text-danger">NO</span>{{/if}}</td>
+                <td><a class="edit-invoice" target="_blank" href="/admin/editInvoice/user/{{_id}}/invoice/{{getCurrentMonth}}">Edit invoice</a></td>
+            </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</template>
+
+<template name="AdminEditInvoicePage">
+    {{#if Template.subscriptionsReady}}
+    <div class="page page-full-height bg-white">
+        {{#with getUser}}
+        <h1 class="page-header">Admin: <small>{{displayName}} invoice for {{dateFormat getMonth "MMMM YYYY"}}</small></h1>
+        {{/with}}
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                {{#if hasInvoice}}
+                    <div class="card mb-4">
+                        <div class="card-header">Invoice link</div>
+                        <div class="card-body">
+                            <a href="{{getInvoiceLink}}" target="_blank" title="view invoice">View invoice</a>
+                            {{#if isInvoicePublished}}
+                                <button class="btn btn-secondary pull-right" disabled>Invoice is published</button>
+
+                                {{#if isInvoiceNotified}}
+                                <button class="btn btn-secondary pull-right mr-2" disabled>User notified</button>
+                                {{else}}
+                                <button class="btn btn-success btn-send-invoice-notification pull-right mr-2">Notify user</button>
+                                {{/if}}
+                            {{else}}
+                                <button class="btn btn-success btn-publish-invoice pull-right">Publish Invoice</button>
+                            {{/if}}
+                        </div>
+                    </div>
+                {{/if}}
+
+                <div class="card">
+                    <div class="card-header">Add invoice for {{dateFormat getMonth "MMMM YYYY"}}</div>
+                    <div class="card-body">
+                        {{#autoForm collection="Invoices" id="invoice-form" type=getFormType doc=getInvoice}}
+                            {{#unless hasInvoice}}
+                            <!-- only set ownerId on insert -->
+                            <div class="row" style="display: none;">
+                                <div class="col">
+                                    <h4 class="mb-4">User</h4>
+                                    {{> afQuickField name='ownerId'}}
+                                </div>
+                            </div>
+                            {{/unless}}
+                            <div class="row">
+                                <div class="col">
+                                    <h4 class="mb-4">Date</h4>
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='month'}}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='year'}}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='date'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col">
+                                    <h4 class="mb-4">Invoice Number</h4>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='invoiceBase'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='invoiceNumber'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col">
+                                    <h4 class="mb-4">Plan</h4>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='plan'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='planPriceTF'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col">
+                                    <h4 class="mb-4">Instanciations</h4>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='instanciationUnitPriceTF'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='instanciationsNumber'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col">
+                                    <h4 class="mb-4">VAT</h4>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='VAT'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='VATIntracomm'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='VATPolicy'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <h4 class="mb-4">Billing Address</h4>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='billingAddress.dest'}}
+                                        </div>
+                                        <div class="col-md-6">
+                                            {{> afQuickField name='billingAddress.phone'}}
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-12">
+                                            {{> afQuickField name='billingAddress.line1'}}
+                                            {{> afQuickField name='billingAddress.line2'}}
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='billingAddress.zipcode'}}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='billingAddress.city'}}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{> afQuickField name='billingAddress.country'}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr/>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    {{#if isInvoicePeriodFinished}}
+                                        <button class="btn btn-primary" type="submit">Save Invoice</button>
+                                    {{else}}
+                                        <p class="text-warning">Invoice month isn't over for now. Can't create the invoice</p>
+                                    {{/if}}
+                                </div>
+                            </div>
+                        {{/autoForm}}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header">Invoice Amount</div>
+                    <div class="card-body" style="padding: 0px;">
+                        <table class="table table-striped" style="width: 100%; text-align: right; margin: 0px;">
+                            <thead>
+                                <tr>
+                                    <th>Article</th>
+                                    <th>Quantity</th>
+                                    <th>Price (Tax free)</th>
+                                    <th>VAT ({{getVAT}})</th>
+                                    <th>Total price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>{{{getUserPlanName}}} plan</td>
+                                    <td>1</td>
+                                    {{#with getUserPlan}}
+                                    <td>{{getPlanPriceTF}}€</td>
+                                    <td></td>
+                                    <td></td>
+                                    {{/with}}
+                                </tr>
+
+                                <tr>
+                                    <td>Application Instanciation</td>
+                                    <td>{{getTotalInstanciations}}</td>
+                                    <td>{{getInstanciationsPricesTF}}€</td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+
+                                <tr style="border-top: 2px solid rgba(0,0,0,0.2);">
+                                    <td>Total</td>
+                                    <td></td>
+                                    <td>{{getTotalPriceTF}}€</td>
+                                    <td>{{getTotalPriceVAT}}€</td>
+                                    <td>{{getTotalPriceTotal}}€</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                    </div>
+                </div>
+
+
+                <div class="card">
+                    <div class="card-header">Instanciations detail</div>
+                    <div class="card-body" style="padding: 0px;">
+                        <table class="table table-striped" style="width: 100%; text-align: right; margin: 0px;">
+                            <thead>
+                                <tr>
+                                    <th>Application</th>
+                                    <th>Version</th>
+                                    <th>Instanciations</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{#each getApps}}
+                                {{#let app=this}}
+                                    {{#each getVersions app}}
+                                    {{#let version=this}}
+                                        {{#if hasInstanciations app version}}
+                                        <tr>
+                                            <td>{{app}}</td>
+                                            <td>{{version}}</td>
+                                            <td>{{getInstanciations app version}}</td>
+                                        </tr>
+                                        {{/if}}
+                                    {{/let}}
+                                    {{/each}}
+                                {{/let}}
+                                {{/each}}
+
+                                <tr style="border-top: 2px solid rgba(0,0,0,0.2);">
+                                    <td>Total</td>
+                                    <td></td>
+                                    <td>{{getTotalInstanciations}}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{else}}
+        {{> Loading }}
+    {{/if}}
+</template>

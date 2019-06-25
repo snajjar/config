@@ -1,0 +1,111 @@
+{
+  "data": {},
+  "metanodes": {},
+  "modules": {
+    "array-get-first" :  {
+      "module": "dualbox-module-array-get-first",
+      "version": "*",
+      "options": {},
+      "defaultInputs": {},
+      "links": {
+        "arr": {
+          "value": "value"
+        }
+      },
+      "graph": {
+        "position": {
+          "left": "440",
+          "top": "60"
+        },
+        "input": {
+          "visible": {
+            "arr": true
+          }
+        }
+      }
+    },
+    "geometry-scale" : {
+      "module": "@dualbox/dualbox-module-geometry-scale",
+      "version": "*",
+      "options": {},
+      "defaultInputs": {
+        "x": 2,
+        "y": 2,
+        "z": 2
+      },
+      "links": {
+        "g": {
+          "array-get-first": "value"
+        }
+      },
+      "graph": {
+        "position": {
+          "left": "670",
+          "top": "60"
+        },
+        "input": {
+          "visible": {
+            "x": false,
+            "y": false,
+            "z": false,
+            "g": true
+          }
+        }
+      }
+    },
+    "value" : {
+      "module": "dualbox-core-value",
+      "version": "*",
+      "id": "value",
+      "options": {},
+      "defaultInputs": {},
+      "links": {
+        "value": {
+          "input": "array-geometry"
+        }
+      },
+      "graph": {
+        "position": {
+          "left": "360",
+          "top": "111"
+        },
+        "input": {
+          "visible": {
+            "value": true
+          }
+        }
+      },
+      "cache": true
+    }
+  },
+  "input": {
+    "array-geometry": {
+      "type": "array<geometry>",
+      "graph": {
+        "position": {
+          "left": "172",
+          "top": "86"
+        }
+      }
+    }
+  },
+  "output": {
+    "geometry": {
+      "type": "geometry",
+      "graph": {
+        "position": {
+          "left": "891",
+          "top": "91"
+        }
+      },
+      "link": {
+        "geometry-scale": "g"
+      }
+    }
+  },
+  "events": {},
+  "libs": {
+    "@dualbox/dualbox": "1.0.8",
+    "@dualbox/dualbox-lib-dualbox-3d": "1.0.7"
+  }
+}

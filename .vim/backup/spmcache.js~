@@ -1,0 +1,200 @@
+/**
+ *   Librairie to manage a cache of spm modules
+ */
+var pjson = require('../package.json');
+var shelljs = require('shelljs');
+var path = require('path');
+var _  = require('lodash');
+var fs = require('fs-extra');
+var os = require('os');
+
+var spmRegistry = pjson.spmRegistry;
+if( spmRegistry === undefined ) {
+    console.warn('No spm registry found in the package.json file.\nPlease add a npm registery url in "spmRegistry" option.');
+    process.exit(1);
+}
+
+class SpmCache {
+    constructor( directoryPath ) {
+        // set path for cache folder
+        this.path = directoryPath;
+        if( this.path === undefined ) {
+            this.path = path.join(os.tmpdir(), 'spmcache');
+        }
+
+        // create the directory if it doesn't exist
+        if( !fs.existsSync(this.path) ){
+            fs.mkdirSync(this.path);
+            fs.mkdirSync(path.join(this.path, 'node_modules'));
+        }
+
+        // add it to the NODE_PATH
+        this.setNodePath();
+        this.shell = shelljs; // debug purpose
+
+        try {
+            this.pkgList = this.fastList();
+        }
+        catch(e) {
+            console.warn('Falling back to the (a LOT slower) npm list. Please consider deleting dead symlinks');
+            this.pkgList = this.list();
+        }
+    }
+
+    // add the cache repository to the current NODE_PATH
+    setNodePath() {
+        var npmPath = shelljs.exec("npm get prefix", { silent: true }).trim();
+        var nodePath1 = path.join(this.path, 'node_modules');
+        var nodePath2 = path.join(npmPath, 'lib', 'node_modules');
+        var nodePath3 = path.join(npmPath, 'node_modules');
+
+        var paths = process.env.NODE_PATH ? process.env.NODE_PATH.split(':') : [];
+        if( paths.indexOf(nodePath1) === -1 ) paths.push( nodePath1 );
+        if( paths.indexOf(nodePath2) === -1 ) paths.push( nodePath2 );
+        if( paths.indexOf(nodePath3) === -1 ) paths.push( nodePath3 );
+        var NODE_PATH = paths.join(':');
+
+        process.env.NODE_PATH = NODE_PATH;
+        shelljs.env.NODE_PATH = NODE_PATH;
+        this.nodePath = NODE_PATH;
+
+        // rerun the node initPaths function
+        require("module").Module._initPaths();
+    }
+
+    getNodePath() {
+        return this.nodePath;
+    }
+
+    // install a package
+    install( name, version ) {
+        var pkgString = version ? name + "@" + version : name;
+        var command = "npm install " + pkgString + " --registry " + spmRegistry;
+        shelljs.exec(command, { 'cwd' : this.path, silent : true });
+    }
+
+    // return true if the package is installed (in cache, global npm or in current directories)
+    isInstalled(name, version) {
+        if( name.indexOf('shapex-core') == 0 ) {
+            return this.isInstalled('shapex');
+        }
+
+        var pkg = this.pkgList[name];
+        if( !pkg ) return false;
+        if( version && pkg.version !== version ) return false;
+        return true;
+
+        /*
+        try {
+            require.resolve(name);
+            return true;
+        }
+        catch( e ) {
+            return false;
+        }
+        */
+    }
+
+    // update the cache
+    update() {
+        // for npm outdated to work, we must ensure we have a package.json in the cache path
+        shelljs.exec("npm init -f -y", { 'cwd' : this.path, silent: true });
+
+        // start updating the packages
+        console.warn('[*] updating spm cache'.green);
+        var command = "npm outdated --json --registry " + spmRegistry;
+        var output = shelljs.exec(command, { 'cwd' : this.path, silent: true });
+
+        if( output.length ) {
+            try {
+                var outdatedPackages = JSON.parse(output);
+                _.each(outdatedPackages, function(pkg, name) {
+                    console.warn('    [*] updating ' + name.yellow + ' from ' + pkg.current.red + ' to ' + pkg.latest.green);
+                    shelljs.exec('npm install ' + name + '@latest --registry ' + spmRegistry, { 'cwd' : this.path, silent: true });
+                });
+            }
+            catch(e) {
+                console.error(e);
+            }
+        }
+    }
+
+    // return the list of installed shapex packages
+    list() {
+        console.warn("[*] listing packages ".green);
+
+        // get globally available packages
+        var command = "npm list -g --depth 0 --json --registry " + spmRegistry;
+        var output = shelljs.exec(command, { silent: true, cwd: this.path });
+        var npmGlobalOutput = JSON.parse(output);
+
+        // some browserify modules doesn't work when installed globally. Don't know why.
+        var deleteModulesWithPrefix = ['browserify', 'cssify', 'babel']; // delete modules that start with thoses
+        var toDelete = [];
+        _.each(npmGlobalOutput.dependencies, function(val, key) {
+            // add a flag to indicate we found this module from global installed
+            val.globalInstall = true;
+
+            // delete the modules that doesn't work from global require (all browserify transforms)
+            _.each( deleteModulesWithPrefix, function(prefix) {
+                if( key.indexOf(prefix) == 0 ) {
+                    toDelete.push(key);
+                }
+            });
+        });
+        _.each(toDelete, function(name) {
+            delete npmGlobalOutput.dependencies[name];
+        });
+
+        // get locally available packages
+        var command = "npm list --depth 0 --json --registry " + spmRegistry;
+        var output = shelljs.exec(command, { silent: true, cwd: this.path });
+        var npmLocalOutput = JSON.parse(output);
+
+        // merge deps and return the object
+        if( !npmLocalOutput.dependencies ) npmLocalOutput.dependencies = {};
+        Object.assign(npmLocalOutput.dependencies, npmGlobalOutput.dependencies);
+        //console.warn("Found: " + Object.keys(npmLocalOutput.dependencies));
+        return npmLocalOutput;
+    }
+
+    // non-rigourous fast npm list
+    fastList() {
+        var list = {};
+        var nodePaths = process.env.NODE_PATH.split(':');
+        nodePaths.push( path.join(this.path, "node_modules") );
+
+        // for each path, check each and every folder for a package.json
+        _.each( nodePaths, p => {
+            try {
+                if( fs.existsSync(p) ) {
+                    var dirs = fs.readdirSync(p).filter(f => fs.statSync(path.join(p, f)).isDirectory());
+                }
+                else {
+                    var dirs = [];
+                }
+            }
+            catch(e) {
+                console.warn('Could not fast-list your packages, probably because of: ' + e);
+                console.warn('(Note: please make sure of removing all dead symlinks in your main node_modules folders)');
+                throw e;
+            }
+
+            _.each( dirs, dir => {
+                var pkgPath = path.join( p, dir, "package.json" );
+                try {
+                    var pkg = require(pkgPath);
+                    list[ pkg.name ] = { "version" : pkg.version };
+                }
+                catch(e) {
+                    //console.warn(pkgPath + " does not exist");
+                    return;
+                }
+            });
+        });
+
+        return list;
+    }
+}
+
+module.exports = SpmCache
