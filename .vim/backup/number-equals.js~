@@ -1,0 +1,30 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+/**
+ *  A simple number equality test module for DualBox
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var NumberEquals = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.parallel = false;
+    this.async = false;
+};
+NumberEquals.prototype = Object.create(DualBox.Module.prototype);
+NumberEquals.prototype.constructor = NumberEquals;
+
+// [Abstract] See DualBox.Module
+NumberEquals.prototype.compute = function(input, response){
+
+    var output = {
+        b : input.x1 === input.x2
+    };
+
+    response.send(output);
+};
+
+module.exports = NumberEquals;
+

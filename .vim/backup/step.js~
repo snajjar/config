@@ -1,0 +1,170 @@
+import { $, env, UIComponent, errors } from '@dualbox/dualbox';
+import { _ } from '@dualbox/dualbox-lib-lodash';
+
+var pkgDesc = require('../package.json');
+
+class Step extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.attr = appDesc.attr || {};
+
+        if( this.attr.steps === undefined ) {
+            this.warn('step component added but no steps specified in attr.steps');
+        }
+
+        this.step = "none";
+        this.steps = this.attr.steps || {};
+        this.flags = this.attr.flags || {};
+        this.flagsChanged = this.attr.flagsChanged || [];
+        this.nodeList = {};
+
+        // Will help determine if triggerStep will be called on a setStep.
+        this.flags_changed = false;
+    }
+
+    // Overwrite from IONode to be able to use flags and step all the time.
+    evalCondition(context, src) {
+        // set up an object to serve as the context for the code being evaluated.
+        var mask = {};
+
+        // mask global properties
+        for( var p in this ) {
+            mask[p] = undefined;
+        }
+        for( var p in context ) {
+            mask[p] = context[p];
+        }
+
+        // execute script in private context
+        return (new Function( "with(this) {var step = '"+this.step+"'; var flags = "+JSON.stringify(this.flags)+"; return " + src + "}; ")).call(mask);
+    }
+
+
+    registerEvents() {
+        super.registerEvents();
+        this.registerUIEvent("setStep", this.onSetStep.bind(this));
+        this.registerUIEvent("refreshStep", this.onRefreshStep.bind(this));
+        this.registerUIEvent("setFlag", this.onSetFlag.bind(this));
+        this.registerUIEvent("getFlags", this.onGetFlags.bind(this));
+        this.registerUIEvent("deleteFlag", this.onDeleteFlag.bind(this));
+    }
+
+    onFlagsChanged(){
+        // trigger all the events defined in attr.onFlagsChanged
+        _.each( this.flagsChanged, (e) => {
+            var hooked_e = JSON.parse(JSON.stringify(e));
+            hooked_e.name = hooked_e.event;
+            if( typeof hooked_e.node == "string" ) hooked_e.node = this.nodeList[hooked_e.node];
+
+            this.emitEvent(hooked_e);
+        });
+    }
+
+    onSetFlag(data){
+        //console.log("setFlag " + data.args.key + " to value " + data.args.value);
+        var prev_flags = JSON.stringify(this.flags);
+        this.flags[data.args.key] = data.args.value;
+        var flags_changed = prev_flags !== JSON.stringify(this.flags);
+
+        if(flags_changed){
+            this.onFlagsChanged();
+        }
+    }
+    onGetFlags(e) {
+        var data = e.args.flag ? this.flags[e.args.flag] : this.flags;
+        this.emit("getFlags", data);
+    }
+
+    onDeleteFlag(data){
+        var prev_flags = JSON.stringify(this.flags);
+        delete this.flags[data.args];
+        var flags_changed = prev_flags !== JSON.stringify(this.flags);
+        if(flags_changed){
+            this.onFlagsChanged();
+        }
+    }
+
+    import( step ) {
+        this.step = step;
+
+        // trigger a setStep after the import
+        var self = this;
+        setTimeout(function() {
+            self.triggerStep(step);
+        }, 0);
+    }
+
+    // redefine connect to handle to bind the event we retrieve from the attrs
+    connect(data, nodes) {
+        super.connect(data, nodes);
+
+        var listeners = {};
+
+        var binder = (e) => {
+            // for all node events
+            if( e.node ) {
+                // check if node is instanciated
+                var node = nodes[e.node];
+                if( node ) {
+                    // link this node to us, but ensure we do it only once
+                    var key = node.id + '#' + e.event;
+                    if( !listeners[key] ) {
+                        listeners[key] = true;
+                        this.nodeList[node.id] = node;
+                        this.on(node, 'UIEvent.' + e.event, node.getEventCb(e.event));
+                    }
+                }
+            }
+        };
+
+        _.each( this.steps, ( eventArray, step ) => {
+            _.each( eventArray, binder );
+        });
+        _.each( this.flagsChanged, binder );
+    }
+
+    onRefreshStep(event){
+        if(this.step !== "none"){
+            this.triggerStep( this.step );
+        }
+    }
+    onSetStep(event) {
+        if(data === "none"){
+            throw "Error : none is a reserved step corresponding to an unset step. It cannot be used in your app.";
+        }
+        // if we weren't already on that step, trigger it
+        var data = event.args;
+        if( data !== this.step ) {
+            this.step = data;
+            this.triggerStep( data );
+            this.trigger({ "step" : this.step });
+        }
+    }
+
+    triggerStep( step ) {
+        // get the selected step
+        var stepDef = this.steps[step];
+        if( stepDef === undefined ) {
+            throw new errors.ImplementationError("step '" + step + "' is not defined in " + this.id);
+        }
+
+        // trigger all the events of this step
+        _.each( stepDef, (e) => {
+            var hooked_e = JSON.parse(JSON.stringify(e));
+            hooked_e.name = hooked_e.event;
+            if( typeof hooked_e.node == "string" ) hooked_e.node = this.nodeList[hooked_e.node];
+
+            this.emitEvent(hooked_e);
+        });
+    }
+
+    onReady() {
+        this.emit('data', { 'step': this.step });
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        return new Step(pkgDesc, appDesc, attrs);
+    }
+}
+
+module.exports = Step;

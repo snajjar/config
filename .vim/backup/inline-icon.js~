@@ -1,0 +1,94 @@
+/* eslint-env es6 */
+var css = require('css');
+var fs = require('fs-extra');
+var path = require('path');
+
+var cssDir = "./dist/";
+var jePath = path.dirname(require.resolve('jsoneditor/package.json'));
+
+fs.ensureDir('./dist');
+
+// copy css
+console.log("Copying js/css files...");
+fs.copySync(path.join(jePath,'dist/jsoneditor.min.css'), 'dist/jsoneditor.min.css');
+fs.copySync(path.join(jePath,'dist/jsoneditor.min.js'), 'dist/jsoneditor.min.js');
+
+// copy the img
+console.log("Copying img files...");
+fs.copySync(path.join(jePath, 'dist/img/'), 'dist/img/');
+
+// now, inline the font into css using base64
+var inlineSVG = function( filePath ) {
+    // read binary data
+    var bitmap = fs.readFileSync(filePath);
+
+    // convert binary data to base64 encoded string
+    var svg = new Buffer(bitmap).toString('utf8');
+
+    // remove first line to keep only the svg definition
+    // add xmlns definition (necessary for inlining it into css
+    svg = svg.split('\n').slice(1).join('');
+    svg = svg.split('\r').join('');
+    svg = svg.split('"').join('\\"');
+    return "url(\"data:image/svg+xml;utf8," + svg + "\")";
+};
+
+var getFilePath = function( urlFontPath ) {
+    var fontFilePath = urlFontPath;
+    if( fontFilePath.indexOf('?') !== -1 ) {
+        fontFilePath = fontFilePath.split('?')[0];
+    }
+    if( fontFilePath.indexOf('#') !== -1 ) {
+        fontFilePath = fontFilePath.split('#')[0];
+    }
+    fontFilePath = "./" + path.join(cssDir, fontFilePath);
+    return fontFilePath;
+};
+
+// for each css file
+fs.readdir(cssDir, (err, files) => {
+    files.forEach(file => {
+        var filePath = path.join(cssDir, file);
+        if( path.extname(filePath) == ".css" ) {
+            var cssFilePath = filePath;
+
+            var fileContent = fs.readFileSync(cssFilePath, "utf8");
+            console.log('Base64 inlining fonts in css file: ' + cssFilePath);
+
+            // find the url() definitions
+            var regexpString = new String(fileContent);
+            var urlRegexp = /url\((.*?)\)/g;
+            var match = urlRegexp.exec(regexpString);
+            var nbMatch = 0;
+            while (match != null) {
+                console.log('Analyzing url: ' + match[1]);
+
+                // find the font file
+                var originalUrl = match[0];
+
+                // get the font file path (clean path)
+                var fontFilePath = getFilePath( match[1] );
+
+                // convert them to dataURI
+                var fontDataURI = inlineSVG( fontFilePath );
+
+                // replace it in the original string
+                console.log('   replacing ' + originalUrl + ' with inlined version');
+                fileContent = fileContent.replace(originalUrl, fontDataURI);
+
+                nbMatch += 1;
+                match = urlRegexp.exec(fileContent);
+            }
+
+            if( nbMatch == 0 ) {
+                console.error('Error: no url() tag found. No fonts were inlined.');
+            }
+            else {
+                console.log('End of url() matching');
+            }
+
+            // when done, overwrite the css file
+            fs.writeFile(cssFilePath, fileContent);
+        }
+    });
+})

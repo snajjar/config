@@ -1,0 +1,68 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var File = require('@dualbox/dualbox-type-file');
+
+var JSZip = require('jszip');
+
+/**
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var ZipMerge = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+};
+ZipMerge.prototype = Object.create(DualBox.Module.prototype);
+ZipMerge.prototype.constructor = ZipMerge;
+
+// [Abstract] See DualBox.Module
+ZipMerge.prototype.compute = function(input, response){
+    this.debug( "Computing output of ZipMerge" );
+
+    var that = this;
+    JSZip.loadAsync(input.zip1.toArrayBuffer()).then(
+        function (zip1) {
+            JSZip.loadAsync(input.zip2.toArrayBuffer()).then(
+                function (zip2) {
+                    var count = 0;
+                    var total = 0;
+                    zip2.forEach(function (relativePath, file){
+                        if(relativePath[relativePath.length-1] !== "/"){
+                            file.async("arraybuffer").then(
+                                function(data){
+                                    if(zip1.file(relativePath)){
+                                        throw "Error in zip-merge module "+that.id+" : cannot merge the files since some files in zip1 have the same names as files of zip2. Merging would overwrite one of those files. Concerned file : "+relativePath;
+                                    }
+                                    zip1.file(relativePath,data);
+                                    count++;
+                                    if(count === total){
+                                        zip1.generateAsync({type : "arraybuffer", compression: "DEFLATE"}).then(function(ab){
+                                            var zfile = new File(ab, "zip", input.filename);
+
+                                            var output = {
+                                                zip:zfile
+                                            };
+                                            response.send(output);
+                                        });
+                                    }
+                                }
+                            );
+                            total++;
+                        }
+                    });
+                }
+            ).catch(
+                function(reason) {
+                    console.error('Cannot read zip2 file : Zip load has been rejected : '+reason+'.');
+                }
+            );
+        }
+    ).catch(
+        function(reason) {
+            console.error('Cannot read zip1 file : Zip load has been rejected : '+reason+'.');
+        }
+    );
+};
+
+module.exports = ZipMerge;
+

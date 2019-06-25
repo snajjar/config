@@ -1,0 +1,626 @@
+import { $, env, Widget3D, Type } from '@dualbox/dualbox';
+import { SphereBufferGeometry, BufferTriGeometry, BufferGeometry, Geometry, Mesh, MeshBasicMaterial, Object3D, Vector3, Plane} from '@dualbox/dualbox-lib-xthree';
+import { _ } from '@dualbox/dualbox-lib-lodash';
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+var pkgDesc = require('../../package.json');
+
+var specialBindings = {
+    sceneDragPosition:true,
+    freeDragPosition:true,
+    dragCloserPosition:true
+};
+
+var pAOV = Widget3D.pushArrObjVal;
+var rmIAO = Widget3D.rmIdxInArrObj;
+
+/**
+ *  Widget to set and move position on a scene mesh.
+ *
+ *  Improvement notes :
+ *      - add possibility to restrict the dragging to some objects in the scene.
+ *        It could be an input array of mesh names on which dragging is allowed.
+ */
+class Widget3DPositions extends Widget3D {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options);
+
+        // clone appDesc to be able to redefine the special events.
+        this.appDesc = JSON.parse(JSON.stringify(this.appDesc));
+        var evts = this.appDesc.attr.mouse || {};
+        var to_rm = {};
+        var that = this;
+        Object.keys(evts).forEach(function (key) {
+            for(var i=0; i<evts[key].length; ++i){
+                var bind = evts[key][i];
+                var buffered = key.search("buffered") === 0;
+                var buff_tag = "";
+                if(buffered){
+                    var seq = key.split("_");
+                    buff_tag = seq[0]+"_";
+                    key = key.replace(buff_tag,"");
+                }
+                if(specialBindings[bind]){
+                    var touch = key.search("touchstart") !== -1;
+                    var butt = touch || key[9] === ":" || key[9] === undefined ? "" : key[9];
+                    // Number of touches, if relevant
+                    var nt = touch && key.length > 10 ? key[10] : "";
+                    if( (key.search("mousedown") === -1 ||  (butt !== "0" && butt !== "1" && butt !=="2")) && !touch){
+                        throw "Error : Widget3DPositions special binding '"+bind+"' has not been made to handle something else than mousedown0, mousdown1 or mousdown2, touchstart, touchstartX with X in 1 9. Please refer to documentation.";
+                    }
+                    var st_evt = buff_tag+(touch ? "touchstart" : "mousedown") + nt;
+                    var stop_evt = buff_tag+(touch ? "touchend" : "mouseup") + nt;
+                    var mv_evt = buff_tag+(touch ? "touchmove" : "mousemove") + nt;
+
+                    pAOV(to_rm,buff_tag+key,i);
+
+                    switch(bind){
+                        case "sceneDragPosition":
+                            {
+
+                                pAOV(evts,st_evt+butt+":widget:"+that.id,"initDragPosition");
+                                pAOV(evts,stop_evt+butt,"stopDragPosition");
+                                pAOV(evts,mv_evt+":scene","runDragPosition");
+                                pAOV(evts,mv_evt+":widget","runDragPosition");
+                                pAOV(evts,mv_evt+":widget:"+that.id,"selectPosition");
+                                pAOV(evts,mv_evt+":scene","unselectAllPositions");
+                                pAOV(evts,mv_evt+":background","unselectAllPositions");
+                            }
+                        break;
+                        case "freeDragPosition":
+                            {
+                                pAOV(evts,st_evt+butt+":widget:"+that.id,"initDragPosition");
+                                pAOV(evts,stop_evt+butt,"stopDragPosition");
+                                pAOV(evts,mv_evt,"runFreeDragPosition");
+                                pAOV(evts,mv_evt+":widget:"+that.id,"selectPosition");
+                                pAOV(evts,mv_evt+":scene","unselectAllPositions");
+                                pAOV(evts,mv_evt+":background","unselectAllPositions");
+                            }
+                        break;
+                        case "dragCloserPosition":
+                            {
+                                pAOV(evts,key,"initDragCloserPosition");
+                                pAOV(evts,stop_evt+butt,"stopDragPosition");
+                                pAOV(evts,mv_evt,"runFreeDragPosition");
+                                if(key.replace("mousedown"+butt+":scene","") === ""){
+                                    // the dragging is setup on all scene elements
+                                    pAOV(evts,mv_evt+":scene","selectCloserPosition");
+                                    pAOV(evts,mv_evt+":widget","unselectAllPositions");
+                                }else if(key.search("mousedown"+butt+":scene") !== -1){
+                                        // the dragging is setup on some specific scene element
+                                        // must deselect on all others.
+                                        pAOV(evts,mv_evt+":widget","unselectAllPositions");
+                                        pAOV(evts,mv_evt+":scene","unselectAllPositions");
+                                }else if(key.replace("mousedown"+butt+":widget","") === ""){
+                                    // the dragging is setup on all widgets
+                                    pAOV(evts,mv_evt+":widget","selectCloserPosition");
+                                    pAOV(evts,mv_evt+":scene","unselectAllPositions");
+                                }else if(key.search("mousedown"+butt+":widget") !== -1){
+                                    // the dragging is setup on some specific widget.
+                                    pAOV(evts,mv_evt+":widget","unselectAllPositions");
+                                    pAOV(evts,mv_evt+":scene","unselectAllPositions");
+                                }
+                                pAOV(evts,mv_evt+":widget:"+that.id,"selectPosition");
+                                pAOV(evts,mv_evt+":background","unselectAllPositions");
+                            }
+                        break;
+                        default:
+                            throw "Error : bind "+bind+" is in the special binding list but is not recognized in the constructor.";
+                        break;
+                    }
+                }
+                key = buff_tag + key;
+            }
+        });
+        // remove all the special bindings that have been found
+        Object.keys(to_rm).forEach(function (key) {
+            var arr = to_rm[key];
+            for(var i=0; i<arr.length; ++i){
+                rmIAO(evts, key, i);
+            }
+        });
+
+
+        this.positions = [];
+        this.g = [];
+        this.limit = pkgDesc.dualbox.input.limit.value;
+        this.restrict = new Function('p', pkgDesc.dualbox.input.restrict.value);
+
+        // initialized the override
+        this.overrideInputs = ["positions", "limit", "restrict"];
+        // Default is set to override mode for all overrideInputs
+        this.initOverride();
+    }
+
+    // We use ids set on vertex to quickly get the index of
+    // which manipulator is under the mouse.
+    updateGeometryId(g,id){
+        if(g.getAttribute("i") === undefined){
+            g.addVertexAttribute(
+              "i",
+              Uint32Array,
+              1
+            );
+        }
+
+        var attr_i = g.getAttribute('i');
+        for(var i=0; i<g.vertexCount(); ++i){
+            attr_i.setX(i,id);
+        }
+    };
+
+    // Reset the vertices positions according to the original
+    // shape.
+    resetVerticesPositions(g, shape){
+        var g_p = g.getAttribute('position');
+        var shape_p = shape.getAttribute('position');
+        for(var i=0; i<g.vertexCount(); ++i){
+            g_p.setXYZ(
+                i,
+                shape_p.getX(i),
+                shape_p.getY(i),
+                shape_p.getZ(i)
+            );
+        }
+    };
+
+    // protected
+    doTrigger(){
+        this.trigger({ "positions" : this.positions });
+    }
+
+    onOverride(data){
+        super.onOverride(data);
+        // We also want to trigger so that if inputs have changed it will be recomputed.
+        // We may optimize to trigger only if there has been an actual change
+        this.doTrigger();
+    }
+
+    registerEvents() {
+        super.registerEvents();
+        this.registerUIEvent("clearValue", this.clearValue.bind(this));
+    }
+
+    // Not really clean. The initializing condition is repeated here and in the
+    // parent class.
+    initialize() {
+        if(!this.initialized && this.canvas3d && this.canvas3d.isInitialized()){
+            super.initialize();
+        }
+    }
+
+    init3D(){
+        var df = this.defaultValue;
+
+        // Set persistant inputs (inputs kept after evaluation for
+        // for 3D preview).
+        this.inputPersist = {
+            shape:      new BufferTriGeometry(),
+            mat:        new MeshBasicMaterial({color:0x009900}),
+            matSelect:  new MeshBasicMaterial({color:0x00ff00})
+        };
+
+        // Session variable (will be saved and restored to it's value)
+        // Keep initial values (positions, limit...) in order to
+        // check when an input has changed and reset the widget accordingly.
+        this.initialValues = this.getSession().variable("initialValues", {
+            positions:[],
+            limit:10
+        });
+        // NOT USED ANYMORE
+
+        this.selected = {};
+
+        this.mesh = new Mesh(
+            new BufferTriGeometry(),
+            this.inputPersist.mat
+        );
+        this.mesh.name = this.id+"#"+"mesh";
+        this.mesh.visible = this.visible;
+        this.selectMesh = new Mesh(
+            new BufferTriGeometry(),
+            this.inputPersist.matSelect
+        );
+        this.selectMesh.name = this.id+"#"+"selectmesh";
+        this.selectMesh.visible = this.visible;
+
+        this.canvas3d.widgetGroup.add(this.mesh);
+        this.canvas3d.widgetGroup.add(this.selectMesh);
+
+        this.dragging = null;
+        // some var for dragging management
+        this.draggingHit0 = new Vector3(); // hit point on init
+        this.draggingOrigPos = new Vector3(); // original position of the position being dragged
+        this.draggingPlane = new Plane();
+    }
+
+    import( positions ) {
+        var p = Type.deserialize( positions );
+
+        this.selected = {};
+        this.positions = [];
+        this.g = [];
+
+        _.each(p, ( v ) => {
+            this.addManipulator(v);
+        });
+        this.updateGeometries();
+        this.override = null;
+
+        this.doTrigger();
+    }
+
+    clearValue(){
+        this.selected = {};
+        this.positions = [];
+        this.g = [];
+        this.updateGeometries();
+        this.doTrigger();
+    }
+
+    // This will override the current positions (set by the user)
+    // with the positions determined from the inputs.
+    // this.override contains which inputs must override the current position.
+    overrideUserInputs(){
+        var inVal = this.inputValue;
+        var changed = this.override;
+
+        if(changed.positions){
+            this.selected = {};
+            this.positions = [];
+            this.g = [];
+            for(var i=0; i<inVal.positions.length; ++i){
+                this.addManipulator(inVal.positions[i]);
+            }
+            this.updateGeometries();
+        }
+        if(changed.limit){
+            this.limit = inVal.limit;
+            if(this.positions.length>this.limit){
+                for(var i=this.limit; i<this.positions.length; ++i){
+                    delete this.selected[i];
+                }
+                this.positions.slice(0,this.limit);
+                this.g.slice(0,this.limit);
+                this.updateGeometries();
+            }
+        }
+        if(changed.restrict){
+            this.restrict = new Function('p', inVal.restrict);
+            for(var i=0; i<this.positions.length; ++i){
+                this.positions[i] = this.restrict(this.positions[i]);
+            }
+            this.updateGeometries();
+        }
+    }
+
+    setPersistentInputValues(){
+        var that = this;
+
+        var pin = this.inputPersist;
+
+        var old_shape = pin.shape;
+
+        var persKeys = ["mat","matSelect", "shape"];
+        persKeys.forEach(function (key) {
+            if( that.inputValid[key] ){
+                pin[key] = that.inputValue[key];
+            }
+        });
+
+        if(pin.shape && pin.shape.uuid !== old_shape.uuid){
+            if(!pin.shape.equals(old_shape)){
+                this.updateGeometries();
+            }
+        }
+
+        if(pin.mat){
+            this.mesh.material = pin.mat;
+        }
+        if(pin.matSelect){
+            this.selectMesh.material = pin.matSelect;
+        }
+    }
+
+    hide(){
+        super.hide();
+        this.mesh.visible = false;
+        this.selectMesh.visible = false;
+    }
+
+    show(){
+        super.show();
+        this.mesh.visible = true;
+        this.selectMesh.visible = true;
+    }
+
+    updateGeometries() {
+
+        var shape = this.inputPersist.shape;
+
+        var arr_g = [];
+        var arr_g_s = [];
+        for(var i=0; i<this.positions.length; ++i){
+            var g = this.inputPersist.shape.clone();
+            this.g[i] = g;
+            this.updateGeometryId(g, i);
+            this.resetVerticesPositions(g,shape);
+            var p = this.positions[i];
+            g.translate(p.x,p.y,p.z);
+            if(this.selected[i]){
+                arr_g_s.push(g);
+            }else{
+                arr_g.push(g);
+            }
+        }
+        this.mesh.geometry.dispose();
+        this.selectMesh.geometry.dispose();
+
+        this.mesh.geometry = BufferTriGeometry.merge(arr_g);
+        this.selectMesh.geometry = BufferTriGeometry.merge(arr_g_s);
+    }
+
+    // return ths index of the closer position.
+    // protected
+    findCloserPosition(point){
+        var tmp = new Vector3();
+        var min_dist = tmp.subVectors(point, this.positions[0]).length();
+        var min_i = 0;
+        for(var i=1; i<this.positions.length; ++i){
+            var d = tmp.subVectors(point, this.positions[i]).length();
+            if(d < min_dist){
+                min_dist = d;
+                min_i = i;
+            }
+        }
+        return min_i;
+    }
+
+    addManipulator(p){
+        this.positions.push(this.restrict(p.clone()));
+        this.g.push(this.inputPersist.shape.clone());
+        this.updateGeometryId(this.g[this.g.length-1], this.g.length-1);
+    }
+
+    // API Function
+    setNewPosition(event){
+        if(this.dragging === null && this.limit > this.positions.length){
+            this.override = null;
+            this.selected = {};
+            this.addManipulator(event.cvs3dEvent.mouseData.underMouse.first.point);
+            this.updateGeometries();
+            this.doTrigger();
+        }else{
+            // resume propagation, as we have finally not captured this event.
+            event.cvs3dEvent.doPropagate();
+        }
+    }
+
+    // API Function
+    selectPosition(event){
+        if(this.dragging === null){
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.on[0] !== "widget" && under.on[1] !== this.id){
+                throw "Error : cannot select position since the clicked element is not the expected widget ("+this.id+").";
+            }else{
+                var attr_i = under.first.object.geometry.getAttribute('i');
+                var gid = attr_i.getX(under.first.face.a);
+                this.selected[gid] = true;
+                this.updateGeometries();
+                if(this.attr.triggerOnSelect){
+                    this.doTrigger();
+                }
+            }
+        }else{
+            // resume propagation, as we have finally not captured this event.
+            event.cvs3dEvent.doPropagate();
+        }
+    }
+
+    selectCloserPosition(event){
+        if(this.dragging === null){
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            // find the closest point to the hit
+            if(this.positions.length !== 0){
+                var closer = this.findCloserPosition(under.first.point);
+                this.selected[closer] = true;
+                this.updateGeometries();
+                if(this.attr.triggerOnSelect){
+                    this.doTrigger();
+                }
+            }
+        }
+        event.cvs3dEvent.doPropagate();
+    }
+
+    // protected
+    deletePositionAtIndex(idx){
+        delete this.selected[idx];
+        for(var i=idx; i<this.positions.length-1; ++i){
+            this.positions[i] = this.positions[i+1];
+            this.g[i] = this.g[i+1];
+            this.updateGeometryId(this.g[i], i);
+        }
+        this.positions.length = this.positions.length-1;
+        this.g.length = this.g.length-1;
+        this.updateGeometries();
+    }
+
+    // API Function
+    deletePosition(event){
+        if(this.dragging === null){
+            this.override = null;
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.on[0] !== "widget" && under.on[1] !== this.id){
+                throw "Error : cannot select position since the clicked element is not the expected widget ("+this.id+").";
+            }else{
+                var attr_i = under.first.object.geometry.getAttribute('i');
+                var gid = attr_i.getX(under.first.face.a);
+                this.deletePositionAtIndex(gid);
+                this.doTrigger();
+            }
+        }else{
+            // resume propagation, as we have finally not captured this event.
+            event.cvs3dEvent.doPropagate();
+        }
+    }
+    deleteCloserPosition(event){
+        if(this.dragging === null && this.positions.length !== 0){
+            this.override = null;
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            var closer = this.findCloserPosition(under.first.point);
+            this.deletePositionAtIndex(closer);
+            this.doTrigger();
+        }else{
+            // resume propagation, as we have finally not captured this event.
+            event.cvs3dEvent.doPropagate();
+        }
+    }
+
+    // API Function
+    unselectAllPositions(event){
+        if(this.dragging === null){
+            if(Object.keys(this.selected).length !== 0){
+                this.selected = {};
+                this.updateGeometries();
+                if(this.attr.triggerOnSelect){
+                    this.doTrigger();
+                }
+            }
+        }
+        event.cvs3dEvent.doPropagate();
+    }
+
+    // API Function
+    initDragPosition(event){
+        if(this.dragging === null){
+            this.override = null;
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.on[0] !== "widget" && under.on[1] !== this.id){
+                throw "Error : cannot drag position since the clicked element is not the expected widget ("+this.id+").";
+            }else{
+                this.canvas3d.enslaveWidget3D(this);
+                var attr_i = under.first.object.geometry.getAttribute('i');
+                var gid = attr_i.getX(under.first.face.a);
+                this.dragging = gid;
+
+                this.draggingHit0.copy(under.first.point);
+                this.draggingOrigPos.copy(this.positions[this.dragging]);
+
+                var caman = this.canvas3d.getCameraMan();
+                var viewdir = caman.getCameraWorldDirection();
+                viewdir.normalize();
+
+                this.draggingPlane.set(viewdir, -this.draggingHit0.dot(viewdir));
+
+                this.updateGeometries();
+                this.doTrigger();
+            }
+        }
+    }
+
+    initDragCloserPosition(event){
+        if(this.dragging === null){
+            this.override = null;
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            var clicked = under.first.point;
+            // find the closest point to the hit
+            if(this.positions.length !== 0){
+                var closer = this.findCloserPosition(under.first.point);
+
+                this.canvas3d.enslaveWidget3D(this);
+                this.dragging = closer;
+
+                this.draggingHit0.copy(under.first.point);
+                this.draggingOrigPos.copy(this.positions[this.dragging]);
+
+                var caman = this.canvas3d.getCameraMan();
+                var viewdir = caman.getCameraWorldDirection();
+                viewdir.normalize();
+
+                this.draggingPlane.set(viewdir, -this.draggingHit0.dot(viewdir));
+
+                this.updateGeometries();
+                this.doTrigger();
+            }
+        }
+    }
+
+    runFreeDragPosition(event){
+        if(this.dragging !== null){
+
+            var md = event.cvs3dEvent.mouseData;
+
+            var caman = this.canvas3d.getCameraMan();
+
+            // Get ray intersection with dragging plane
+            var ray = caman.getRay(md.canvasX, md.canvasY);
+            var plane_hit = ray.intersectPlane(this.draggingPlane, new Vector3());
+
+            // Compute translation vector
+            var transvec = (new Vector3()).subVectors(plane_hit, this.draggingHit0);
+
+            var p = this.positions[this.dragging];
+            p.copy(this.draggingOrigPos).add(transvec);
+            this.positions[this.dragging] = this.restrict(p);
+
+            this.updateGeometries();
+            this.doTrigger();
+        }
+    }
+
+    // API Function
+    // Always drag on scene for now. See improvement notes.
+    runDragPosition(event){
+        if(this.dragging !== null){
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.objects.length !== 0){
+                this.positions[this.dragging] = this.restrict(under.objects[0].point.clone());
+                this.updateGeometries();
+                this.doTrigger();
+            }
+        }
+    }
+
+    // API Function
+    stopDragPosition(event){
+        if(this.dragging !== null){
+            this.canvas3d.freeWidget3D(this);
+            this.dragging = null;
+        }
+    }
+
+    // protected
+    emitData(){
+        this.emit('data', { "positions" : this.positions /*, "selected" : selectPos */ });
+        this.enableRead();
+    }
+
+    onReady() {
+
+        if(this.override){
+            this.overrideUserInputs();
+        }
+        this.setPersistentInputValues();
+
+        /*
+        var selectPos = [];
+        for(var i=0; i<this.positions.length; ++i){
+            var p = this.positions[i];
+            if(this.selected[i]){
+                selectPos.push(i);
+            }
+        }
+        */
+
+        this.emitData();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        var dt = new Widget3DPositions(pkgDesc, appDesc, attrs);
+        return dt;
+    }
+}
+
+module.exports = Widget3DPositions;

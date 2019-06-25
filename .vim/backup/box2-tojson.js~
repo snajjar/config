@@ -1,0 +1,26 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var JSONObject = require('@dualbox/dualbox-type-json');
+
+/**
+ *  A simple vector substraction module for DualBox.
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var Box2 = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.parallel = false;
+    this.async = false;
+};
+Box2.prototype = Object.create(DualBox.Module.prototype);
+Box2.prototype.constructor = Box2;
+
+// [Abstract] See DualBox.Module
+Box2.prototype.compute = function(input, response){
+    response.send({
+        json : new JSONObject(input.box.toJSON())
+    });
+};
+
+module.exports = Box2;

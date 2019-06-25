@@ -1,0 +1,30 @@
+/* HIDE RADIO */
+.dualbox-radio-div [type=radio] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* IMAGE STYLES */
+ .dualbox-radio-div [type=radio] + img {
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+
+/* CHECKED STYLES */
+.dualbox-radio-div [type=radio]:checked + img {
+    border: 2px solid #2E6DA4;
+}
+
+.dualbox-radio-container {
+    width: 100%;
+}
+
+.dualbox-radio-div {
+    width: 100%;
+}
+
+.dualbox-radio-imgcontainer {
+    margin: 10px;
+}

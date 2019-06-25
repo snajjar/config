@@ -1,0 +1,25 @@
+/*
+ *   Default DualBox init file
+ *
+ *   This file will be included in all bundles that only contains 1 application description
+ *   It will NOT be run on a require('@dualbox/dualbox')
+ */
+var DualBox = require('@dualbox/dualbox');
+
+// export to window
+if( DualBox.env.browser ) {
+    if( window ) {
+        if( window.DualBox && window.DualBox instanceof Object ) {
+            // assign all DualBox properties into the existing object
+            DualBox.$ = window.DualBox.$ || window.jQuery || require('@dualbox/dualbox-lib-jquery');
+            Object.assign(window.DualBox, DualBox);
+        }
+        else {
+            DualBox.$ = window.jQuery || require('@dualbox/dualbox-lib-jquery');
+            window.DualBox = DualBox;
+        }
+        window.ShapeX = window.DualBox; // backward compatibility
+    }
+}
+
+module.exports = DualBox;

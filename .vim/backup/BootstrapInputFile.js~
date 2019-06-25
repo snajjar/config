@@ -1,0 +1,244 @@
+import { env, UIComponent, $, Type, sessionStorage, errors} from '@dualbox/dualbox';
+var fetchFile = require('@dualbox/dualbox-lib-dualbox-fetch-file');
+var pkgDesc = require('../../package.json');
+
+import * as JSZip from '@dualbox/dualbox-lib-jszip';
+import * as JSZipSync from '@dualbox/dualbox-lib-jszip-sync';
+
+var DualBoxFile = require('@dualbox/dualbox-type-file');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./BootstrapInputFile.css'); // for bundle compilation
+}
+
+/**
+ *  Zip f. Will throw if f is already zipped.
+ */
+var zipDualBoxFile = function(f, sync, callback){
+    var ext = f.getExtension();
+    if(ext.toLowerCase() === "zip"){
+        throw "File is already zipped";
+    }
+    var name = f.getName() + "." + ext;
+
+    var zip = sync ? new JSZipSync() : new JSZip(); // JSZIpSync crashes on sync
+    var wrapper = function(){
+        zip.file(name,f.toArrayBuffer());
+        zip.generateAsync({type : "arraybuffer", compression: "DEFLATE"}).then(function(ab){
+            var zfile = new DualBoxFile(ab, "zip", f.getName());
+            callback(zfile);
+        });
+    }
+    if(sync){
+        zip.sync(wrapper);
+    }else{
+        wrapper();
+    }
+}
+
+/**
+ *  Attributes in appDesc :
+ *  label : html label befor the button
+ *  id : html id
+ *  accept : the accept tag of the input file html.
+ */
+class BootstrapInputFile extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.val = null;
+
+        // button is instanciated by attachTo
+        this.button = null;
+
+        // instanciate a hidden fileInput
+        this.fileInput = $('<input/>', {
+            id:    this.attr.id,
+            type:  'file',
+            accept: this.attr.accept === undefined ? '*' : this.attr.accept,
+        });
+
+        // request to get the initial value
+        this.request = null;
+    }
+
+    registerEvents() {
+        super.registerEvents();
+
+        this.registerUIEvent("clearValue", this.clearValue.bind(this));
+    }
+
+    import(val) {
+        this._stopFetchingInitialValue();
+        this.val = Type.deserialize(val);
+        if(this.attr.forceZip && this.val.getExtension().toLowerCase() !== "zip"){
+            var self = this;
+            zipDualBoxFile(this.val, true, function(f){
+                self.val = f;
+                self.trigger({"file" : self.val});
+            });
+        }else{
+            this.trigger({"file" : this.val});
+        }
+    }
+
+    onReady() {
+        if(this.request !== null){
+            var self = this;
+            setTimeout(
+                function(){
+                    self.onReady();
+                },
+                50
+            );
+        }else{
+            this.emit('data', { "file" : this.val });
+        }
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+    }
+
+    hide(){
+        $(this.div).hide();
+    }
+
+    show(){
+        $(this.div).show();
+    }
+
+    clearValue(e){
+        this._stopFetchingInitialValue();
+
+        $(this.div).find('.filename-display').text( this.attr.spanDefaultText || "no file selected" );
+        this.fileInput.replaceWith(this.fileInput.val('').clone(true));
+        this.fileInput.change((e) => {
+            this.onChange(e);
+        });
+
+        this.val = null;
+        this.trigger({"file" : this.val});
+    }
+
+    onChange(evt) {
+        var that = this;
+
+        var files = evt.target.files; // FileList object
+
+        // display the selected file name to our div
+        $(this.div).find('.filename-display').text( files[0].name );
+
+        // split extension and filename
+        var tags = files[0].name.split('.');
+        var name = "";
+        for(var i=0; i<tags.length-1; ++i){
+            name = name + tags[i];
+        }
+
+        var ext = "";
+        if(tags.length > 1){
+            ext = tags[tags.length-1];
+        }
+
+        this._stopFetchingInitialValue();
+
+        // extract json content
+        var self = this;
+        DualBoxFile.asyncBuildFromBlob(files[0],ext.toLowerCase(),name,function(file){
+            self.val = file;
+            if(self.attr.forceZip && file.getExtension().toLowerCase() !== "zip"){
+                zipDualBoxFile(file, false, function(zf){
+                    self.val = zf;
+                    self.trigger({"file" : self.val});
+                });
+            }else{
+                self.trigger({"file" : self.val});
+            }
+        });
+    }
+
+    _stopFetchingInitialValue(){
+        if( this.request != null ) {
+            this.warn("INTERRUPTING INITIAL VALUE HTTP REQUEST");
+            this.request.abort();
+            this.request = null;
+        }
+    }
+
+    _fetchInitialValue(url){
+        var self = this;
+
+        fetchFile(this, url, this, function(file){
+            self.val = file;
+            var name = url.split(new RegExp("/|\\\\","g"));
+            name = name[name.length-1];
+            $(self.div).find('.filename-display').text( name );
+        });
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var component = new BootstrapInputFile(pkgDesc, appDesc, attrs);
+
+        // create the button separately and bind the click event to the component's hidden fileInput
+        component.button = $('<button/>', {
+            class: "btn " + (component.attr.btnClass || "btn-primary"),
+            style: "display: inline-block; border-bottom-right-radius:0px; border-top-right-radius: 0px;"
+        }).append(
+            $('<span/>').append( component.attr.btnText || "Select file" ),
+        ).click(function() {
+            component.fileInput.click();
+        });
+
+
+        // build the rest of the div (with the span that will show the file on click)
+        component.div =
+            $('<div/>', { class : "dualbox form-group db-input-file-div" }).append(
+                component.button,
+                $('<div/>', {
+                    class: "dualbox-file-display",
+                    style: "display: inline-block; min-height: 100%; min-width: 100px; " +
+                           "border: 1px solid rgb(221, 221, 221); padding: 6px 12px; " +
+                           "position: relative; border-bottom-right-radius:4px; " +
+                           "border-top-right-radius: 4px; text-overflow: ellipsis; " +
+                           "overflow-x: hidden; white-space: nowrap; vertical-align: bottom;"
+                }).append(
+                    $('<span/>', { class: "filename-display" }).append( component.attr.spanDefaultText || "no file selected" )
+                )
+            );
+
+
+        // measure the button width, then adjust the text div width from there
+        var b = $(component.button).clone(false);
+        b.css({ "display" : "block", "position" : "absolute", "visibility" : "hidden" });
+        b.appendTo("body").ready(function() {
+            var buttonWidth = b.outerWidth();
+            $(component.div).find('.dualbox-file-display').css({ "width" : "calc(100% - " + buttonWidth + "px" });
+            b.remove();
+        });
+
+        // bind fileInput change() to our component onChange
+        component.fileInput.change(function(e) {
+            component.onChange(e);
+        });
+
+        if( component.attr.valueStr ) {
+            component._fetchInitialValue(component.attr.valueStr);
+        }
+        else if( component.attr.value ) {
+            component.val = Type.deserialize(component.attr.value);
+        }
+
+        // append to param div and return the input
+        $(div).append(component.div);
+
+        return component;
+    }
+}
+
+module.exports = BootstrapInputFile;

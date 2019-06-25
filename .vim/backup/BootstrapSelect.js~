@@ -1,0 +1,240 @@
+import { $, env, UIComponent, Type} from '@dualbox/dualbox';
+var pkgDesc = require('../package.json');
+import { _ } from '@dualbox/dualbox-lib-lodash';
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./BootstrapSelect.css'); // for bundle compilation
+}
+
+
+class BootstrapSelect extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.val = null;
+        this.valDef = null;
+        this.div = null;
+
+        this.valuesMap = {};
+        this.resultType = null;
+    }
+
+    registerEvents() {
+        super.registerEvents();
+
+        // Register events
+        this.registerUIEvent("hide",          this.hide.bind(this));
+        this.registerUIEvent("show",          this.show.bind(this));
+        this.registerUIEvent("enable",        this.enable.bind(this));
+        this.registerUIEvent("disable",       this.disable.bind(this));
+        this.registerUIEvent("hideOption",    this.hideOption.bind(this));
+        this.registerUIEvent("showOption",    this.showOption.bind(this));
+        this.registerUIEvent("enableOption",  this.enableOption.bind(this));
+        this.registerUIEvent("disableOption", this.disableOption.bind(this));
+        this.registerUIEvent("addOption",     this.addOption.bind(this));
+        this.registerUIEvent("removeOption",  this.removeOption.bind(this));
+        this.registerUIEvent("setValue",      this.setValue.bind(this));
+    }
+
+    setValue(e) {
+        var value = this.resultType.toLowerCase() === "string" ? e.args : JSON.stringify(data.args);
+        $(this.div).find('select').val( value );
+        this.onChange();
+    }
+
+    onReady() {
+        this.emit('data', { "result" : this.val });
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+        $(this.div).css("opacity", "0.5");
+        $(this.div).css("pointer-events", "none");
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+        $(this.div).css("opacity", "");
+        $(this.div).css("pointer-events", "");
+    }
+
+    hide() {
+        $(this.div).hide();
+    }
+
+    show() {
+        $(this.div).show();
+    }
+
+    hideOption(data) {
+        var value = this.resultType.toLowerCase() === "string" ? data.args : JSON.stringify(data.args);
+        $(this.div).find('option[value="' + value + '"]').hide();
+    }
+
+    showOption(data) {
+        var value = this.resultType.toLowerCase() === "string" ? data.args : JSON.stringify(data.args);
+        $(this.div).find('option[value="' + value + '"]').show();
+    }
+
+    disableOption(data) {
+        var arr = null;
+        if(data.args instanceof Array){
+            arr = data.args;
+        }else{
+            arr = [data.args];
+        }
+        var original_value = $(this.div).find('select').val();
+        for(var i=0; i<arr.length; ++i){
+
+            var value = this.resultType.toLowerCase() === "string" ? arr[i] : JSON.stringify(arr[i]);
+            var current_value = $(this.div).find('select').val();
+            var default_value = this.resultType.toLowerCase() === "string" ? this.valDef : JSON.stringify(this.valDef);
+
+            $(this.div).find('option[value="' + value + '"]').prop("disabled", true);
+            if(current_value === value){
+                var selectEl = $(this.div).find('select');
+
+                if(current_value !== default_value && !$(this.div).find('option[value="' + default_value + '"]').prop("disabled")){
+                    selectEl.val( default_value );
+                    this.val = this.valuesMap[default_value];
+                }else{
+                    var found = false;
+                    selectEl.find('option').each(function(index,element){
+                        if(!found && !$(element).prop("disabled")){
+                            selectEl.val( $(element).val() );
+                            this.val = this.valuesMap[$(element).val()];
+                            found = true;
+                        }
+                    });
+                }
+            }
+        }
+
+        if(original_value !== $(this.div).find('select').val()){
+            this.onChange();
+        }
+    }
+
+    // data.args must be given in JSON or as an array of JSON.
+    enableOption(data) {
+        var arr = null;
+        if(data.args instanceof Array){
+            arr = data.args;
+        }else{
+            arr = [data.args];
+        }
+        for(var i=0; i<arr.length; ++i){
+            var value = this.resultType.toLowerCase() === "string" ? arr[i] : JSON.stringify(arr[i]);
+            $(this.div).find('option[value="' + value + '"]').prop("disabled", false);
+        }
+    }
+
+    addOption(data) {
+        var value = this.resultType.toLowerCase() === "string" ? data.args.value : JSON.stringify(data.args.value);
+        this.valuesMap[value] = Type.fromJSON(data.args.value);
+        if($(this.div).find('option[value="' + value + '"]').length===0){
+            $(this.div).find('select').append( $('<option/>', { class: 'dualbox', value: value }).append(data.args.label) );
+        }
+    }
+
+    // data.args must be given in JSON if it is not a native type
+    removeOption(data) {
+        var value = this.resultType.toLowerCase() === "string" ? data.args : JSON.stringify(data.args);
+        if($(this.div).find('select').val() === value){
+            this.disableOption(data);
+        }
+        $(this.div).find('option[value="' + value + '"]').remove();
+    }
+
+    import( value ) {
+        this.val = Type.fromJSON(value);
+        $(this.div).find('select').val(
+            this.resultType.toLowerCase() === "string" ? value : JSON.stringify(value)
+        );
+        this.trigger( { "result" : this.val } );
+    }
+
+    onChange(e) {
+        this.val = this.valuesMap[$(this.div).find('select').val()];
+        this.trigger( { "result" : this.val } );
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        var uiElement = new BootstrapSelect(pkgDesc, appDesc, attrs);
+
+        var attr = uiElement.attr;
+
+        // build the select div from app.json parameters
+        var selectDiv = $('<select/>', {
+            class: 'dualbox form-control ' + (attr.class || ''),
+        });
+
+        if( !attr.options ) {
+            throw "Can not instanciate select without any options defined in the application!";
+        }
+        _.each( attr.options, function(o) {
+            if(uiElement.resultType === null && o.value !== null){
+                uiElement.resultType = Type.detectType(o.value);
+            }else{
+                if(uiElement.resultType !== Type.detectType(o.value)){
+                    throw "Error : some values of the select do not have the same type : found "+uiElement.resultType+" and "+Type.detectType(o.value)+".";
+                }
+            }
+            var strval = uiElement.resultType.toLowerCase() === "string" ? o.value : JSON.stringify(o.value);
+            uiElement.valuesMap[strval] = Type.fromJSON(o.value);
+            selectDiv.append( $('<option/>', { class: 'dualbox', value: strval }).append(o.label) );
+        });
+
+        // build the container
+        uiElement.div = $('<div/>', { class : "dualbox form-group db-select-div" }).append(
+            $('<label/>', { class: "dualbox", text: attr.label }),
+            selectDiv
+        );
+        uiElement.val = uiElement.valuesMap[
+            uiElement.resultType.toLowerCase() === "string" ?
+                attr.options[0].value :
+                JSON.stringify(attr.options[0].value)
+        ];
+
+        var init_value = attr.value;
+        if( init_value ) {
+            uiElement.valDef = Type.fromJSON(init_value);
+            uiElement.val = uiElement.valDef ;
+        }else{
+            uiElement.valDef = uiElement.val;
+            init_value = attr.options[0].value;
+        }
+        $(selectDiv).val(
+            uiElement.resultType.toLowerCase() === "string" ? init_value : JSON.stringify(init_value)
+        );
+
+
+        // This option is such that selecting twice the same option in the select
+        // will still trigger this element.
+        // Can be useful when you want to react to the clic even if the current value has been emitted before.
+        if( attr.triggerOnClick ){
+            selectDiv.click(function () {
+                if ($(this).data('click')) {
+                    uiElement.onChange();
+                    $(this).data('click', false);
+                } else {
+                    $(this).data('click', true);
+                }
+            });
+        }
+        else {
+            // bind events
+            selectDiv.change(uiElement.onChange.bind(uiElement));
+        }
+
+        // append to param div and return the element
+        $(div).append(uiElement.div);
+        if( attr.hidden ) {
+            $(uiElement.div).hide();
+        }
+
+        return uiElement;
+    }
+}
+
+module.exports = BootstrapSelect;

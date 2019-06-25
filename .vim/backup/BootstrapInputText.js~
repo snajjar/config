@@ -1,0 +1,99 @@
+import { $, env, UIComponent } from '@dualbox/dualbox';
+var pkgDesc = require('../package.json');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./BootstrapInputText.css'); // for bundle compilation
+}
+
+/**
+ *  Attributes in appDesc :
+ *  label : html label befor the text box
+ *  id : html id
+ *  value : initial value
+ *  delay : buffering time before sending the changes. Important if one do not want to trigger computation at each key push.
+ *  emptyValue : value to send when the text box is empty. Useful for app which cannot support an empty value.
+ */
+class BootstrapInputText extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.val = null;
+        this.div = null;
+
+        this.bufferInterval = null;
+    }
+
+    import( value ) {
+        this.val = value;
+        var val = this.val === "" && this.attr.emptyValue ? this.attr.emptyValue : this.val;
+        if(this.val !== "" || this.attr.triggerWhenEmpty){
+            this.trigger({ "result" : val });
+        }
+    }
+
+    onReady() {
+        if(this.val === "" && this.attr.emptyValue){
+            this.emit('data', { "result" : this.attr.emptyValue });
+        }else{
+            this.emit('data', { "result" : this.val });
+        }
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+    }
+
+    hide(){
+        $(this.div).hide();
+    }
+
+    show(){
+        $(this.div).show();
+    }
+
+    onKeyUp(e) {
+        if(this.val !== $(this.div).find('input').val()){
+            this.val = $(this.div).find('input').val();
+
+            var val = this.val === "" && this.attr.emptyValue ? this.attr.emptyValue : this.val;
+            if(this.val !== "" || this.attr.triggerWhenEmpty){
+                this.trigger({ "result" : val });
+            }
+        }
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var component = new BootstrapInputText(pkgDesc, appDesc, attrs);
+
+        var attr = component.attr;
+
+        // instanciate div from app.json parameters
+        component.div =
+            $('<div/>', { class : "dualbox form-group db-input-text-div" }).append(
+                $('<label/>', { class : "dualbox" }).append(
+                    $('<span/>', { class : "dualbox", text: attr.label + ": " })
+                ),
+                $('<input/>', {
+                    id:    attr.id,
+                    type:  'text',
+                    class: 'dualbox form-control',
+                    value: attr.value,
+                    maxlength : attr.maxlength
+                })
+                //.change(component.onChange.bind(component)) // bind onChange
+                .keyup(component.onKeyUp.bind(component)) // bind onKeyUp
+            );
+        component.val = attr.value;
+
+        // append to param div and return the slider
+        $(div).append(component.div);
+        return component;
+    }
+}
+
+module.exports = BootstrapInputText;

@@ -1,0 +1,264 @@
+import { $, env, Widget3D, Type, Errors} from '@dualbox/dualbox';
+import { SphereBufferGeometry, BufferTriGeometry, BufferLineGeometry, BufferGeometry, Geometry, Mesh, MeshBasicMaterial, LineBasicMaterial, Object3D, Line, LineSegments, Vector3, Plane} from '@dualbox/dualbox-lib-xthree';
+import { _ } from '@dualbox/dualbox-lib-lodash';
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+var pkgDesc = require('../package.json');
+
+var specialBindings = {
+    drawline:true
+};
+
+var pAOV = Widget3D.pushArrObjVal;
+var rmIAO = Widget3D.rmIdxInArrObj;
+
+/**
+ *  Widget to set and move position on a scene mesh.
+ *
+ *  Improvement notes :
+ *      - add possibility to restrict the dragging to some objects in the scene.
+ *        It could be an input array of mesh names on which dragging is allowed.
+ */
+class Widget3DDrawLine extends Widget3D {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options);
+
+        if(!this.attr.single && !this.attr.linesegments){
+            throw new Errors.RuntimeError("Attribute linesegments cannot be true if attribute single is false on Widget3DDrawLine.");
+        }
+
+        // clone appDesc to be able to redefine the special events.
+        this.appDesc = JSON.parse(JSON.stringify(this.appDesc));
+        var evts = this.appDesc.attr.mouse || {};
+        var to_rm = {};
+        var that = this;
+        Object.keys(evts).forEach(function (key) {
+            for(var i=0; i<evts[key].length; ++i){
+                var bind = evts[key][i];
+                var buffered = key.search("buffered") === 0;
+                var buff_tag = "";
+                if(buffered){
+                    var seq = key.split("_");
+                    buff_tag = seq[0]+"_";
+                    key = key.replace(buff_tag,"");
+                }
+                if(specialBindings[bind]){
+                    var touch = key.search("touchstart") !== -1;
+                    var butt = touch || key[9] === ":" || key[9] === undefined ? "" : key[9];
+                    // Number of touches, if relevant
+                    var nt = touch && key.length > 10 ? key[10] : "";
+                    if( (key.search("mousedown") === -1 ||  (butt !== "0" && butt !== "1" && butt !=="2")) && !touch){
+                        throw "Error : Widget3DDrawLine special binding '"+bind+"' has not been made to handle something else than mousedown0, mousdown1 or mousdown2, touchstart, touchstartX with X in 1 9. Please refer to documentation.";
+                    }
+                    var st_evt = buff_tag+(touch ? "touchstart" : "mousedown") + nt;
+                    var stop_evt = buff_tag+(touch ? "touchend" : "mouseup") + nt;
+                    var mv_evt = buff_tag+(touch ? "touchmove" : "mousemove") + nt;
+                    var target = key.replace(st_evt+butt,"");
+
+                    pAOV(to_rm,buff_tag+key,i);
+
+                    switch(bind){
+                        case "drawline":
+                            {
+
+                                pAOV(evts,st_evt+butt+target,"initDrawLine");
+                                pAOV(evts,stop_evt+butt,"stopDrawLine");
+                                pAOV(evts,mv_evt+target,"runDrawLine");
+                            }
+                        break;
+                        default:
+                            throw "Error : bind "+bind+" is in the special binding list but is not recognized in the constructor.";
+                        break;
+                    }
+                }
+                key = buff_tag + key;
+            }
+        });
+        // remove all the special bindings that have been found
+        Object.keys(to_rm).forEach(function (key) {
+            var arr = to_rm[key];
+            for(var i=0; i<arr.length; ++i){
+                rmIAO(evts, key, i);
+            }
+        });
+
+
+        this.positions = [];
+        this.lg = [];
+
+        // initialized the override
+        this.overrideInputs = [];
+        // Default is set to override mode for all overrideInputs
+        super.initOverride();
+    }
+
+    // protected
+    doTrigger(){
+        this.trigger({ "lg" : this.lg });
+    }
+
+    registerEvents() {
+        super.registerEvents();
+        this.registerUIEvent("clearValue", this.clearValue.bind(this));
+    }
+
+    // Not really clean. The initializing condition is repeated here and in the
+    // parent class.
+    initialize() {
+        if(!this.initialized && this.canvas3d && this.canvas3d.isInitialized()){
+            super.initialize();
+        }
+    }
+
+    init3D(){
+
+        this.lg = new BufferLineGeometry(this.attr.linesegments);
+
+        // Set persistant inputs (inputs kept after evaluation for
+        // for 3D preview).
+        this.inputPersist = {
+            mat:        new LineBasicMaterial({color:0x009900})
+        };
+
+        this.mesh = this.lg.isLineSegments() ?
+            new LineSegments(
+                this.lg,
+                this.inputPersist.mat
+            ) :
+            new Line(
+                this.lg,
+                this.inputPersist.mat
+            );
+        this.mesh.name = this.id+"#"+"mesh";
+        this.mesh.visible = this.visible;
+
+        this.canvas3d.widgetGroup.add(this.mesh);
+
+        this.drawing = null;
+        this.drawOnlyOne = false;
+
+        if(this.attr.hidden){
+            this.hide();
+        }
+    }
+
+    import( lg ) {
+        this.lg = Type.deserialize( lg );
+        this.mesh.geometry = this.lg;
+
+        this.override = null;
+        this.doTrigger();
+    }
+
+    clearValue(){
+        this.lg = new BufferLineGeometry(this.attr.linesegments);
+        this.mesh.geometry = this.lg;
+        this.updateGeometries();
+        this.doTrigger();
+    }
+
+    setPersistentInputValues(){
+        var that = this;
+
+        var pin = this.inputPersist;
+
+        var persKeys = ["mat"];
+        persKeys.forEach(function (key) {
+            if( that.inputValid[key] ){
+                pin[key] = that.inputValue[key];
+            }
+        });
+
+        if(pin.mat){
+            this.mesh.material = pin.mat;
+        }
+    }
+
+    hide(){
+        super.hide();
+        this.mesh.visible = false;
+    }
+
+    show(){
+        super.show();
+        this.mesh.visible = true;
+    }
+
+
+    // API Function
+    initDrawLine(event){
+        if(!this.drawing){
+            this.override = null;
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.objects.length !== 0){
+
+                if(this.attr.single){
+                    this.lg.setVerticesNumber(0);
+                    this.lg.setSegmentsNumber(0);
+                }
+
+                this.canvas3d.enslaveWidget3D(this);
+                this.drawing = true;
+
+                this.drawOnlyOne = true;
+
+                this.lg.addVertex({
+                    position:under.objects[0].point.clone()
+                });
+
+                this.doTrigger();
+            }
+        }
+    }
+
+    // API Function
+    // Always drag on scene for now. See improvement notes.
+    runDrawLine(event){
+        if(this.drawing){
+            var under = event.cvs3dEvent.mouseData.underMouse;
+            if(under.objects.length !== 0){
+                this.drawOnlyOne = false;
+                this.lg.addVertex({
+                    position:under.objects[0].point.clone()
+                });
+                var idx = this.lg.vertexCount()-1;
+                if(this.attr.linesegments){
+                    this.lg.addSegment(idx-1,idx);
+                }
+                this.doTrigger();
+            }
+        }
+    }
+
+    // API Function
+    stopDrawLine(event){
+        if(this.drawing){
+            if(this.drawOnlyOne){
+                this.lg.setVerticesNumber(this.lg.vertexCount()-1);
+                this.drawOnlyOne = false;
+            }
+            this.canvas3d.freeWidget3D(this);
+            this.drawing = false;
+        }
+    }
+
+    // protected
+    emitData(){
+        this.emit('data', { "lg" : this.lg });
+    }
+
+    onReady() {
+
+        this.setPersistentInputValues();
+
+        this.emitData();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        var dt = new Widget3DDrawLine(pkgDesc, appDesc, attrs);
+        return dt;
+    }
+}
+
+module.exports = Widget3DDrawLine;

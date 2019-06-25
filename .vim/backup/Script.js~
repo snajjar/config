@@ -1,0 +1,43 @@
+"use strict";
+
+const errors = require('../../Errors');
+const LoopModule = require('../LoopModule');
+const _ = require('lodash');
+const desc = require('./Script.json');
+
+const JSONObject = require('@dualbox/dualbox-type-json');
+
+function getFunctionBody( str ) {
+    str = str.replace(/(\/\*[^*]*\*\/)|(\/\/[^*]*)/g, ''); // remove all comments
+    return str.substring(str.indexOf("{") + 1, str.lastIndexOf("}"));
+};
+
+/**
+ *  Module If is here to choose between two options from a condition
+ *  by evaluating only the path from one of them (for performances)
+ */
+class Script extends LoopModule {
+    constructor(attrs) {
+        var appDesc = attrs.appDesc;
+
+        // check if the script is defined
+        var script = appDesc && appDesc.attr && appDesc.attr.script;
+        if( !script ) {
+            throw new errors.RuntimeError("No script provided in attrs.script");
+        }
+
+        // check that it's really a function
+        var f = new Function("json", getFunctionBody(script));
+        super(desc, attrs);
+
+        // save the info we got
+        this.f = f;
+    }
+
+    compute(inputs, response) {
+        var result = this.f.apply(this, [ inputs.json.get() ]);
+        response.send({ "json" :  new JSONObject(result) });
+    }
+}
+
+module.exports = Script

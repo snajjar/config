@@ -1,0 +1,44 @@
+Template.DashboardPage.onCreated(function() {
+    this.autorun( ()=> {
+        // count apps
+        subMgr.subscribe('user_AppsCount');
+
+        // count instanciations
+        subMgr.subscribe('select_InstanciationsMonth', { year: moment().year(), month: moment().month(), ownerId: Meteor.userId() });
+
+        // count building versions
+        subMgr.subscribe('select_AppVersions', { 'deployStatus': 'building...', ownerId: Meteor.userId() });
+    });
+});
+
+Template.DashboardPage.helpers({
+    getMonthInstancationsCount : function() {
+        var monthInstanciations = InstanciationsMonth.find({ ownerId: Meteor.userId(), year: moment().year(), month: moment().month() }).fetch();
+
+        var sum = 0;
+        _.each( monthInstanciations, (i) => {
+            sum += i.count;
+        });
+        return sum;
+    },
+
+    getNbAppsBuilding: function() {
+        return AppVersions.find({ 'deployStatus': 'building...' }).count();
+    },
+
+    userMailVerified: function() {
+        return Meteor.user() && Meteor.user().emails[0].verified;
+    },
+});
+
+Template.NotificationsCard.onCreated(function() {
+    this.autorun( () => {
+        subMgr.subscribe('user_Notifications');
+    });
+});
+
+Template.NotificationsCard.helpers({
+    notifications : function() {
+        return Notifications.find({ ownerId: Meteor.userId() }, { sort: { createdAt: -1 }, limit: 6 });
+    }
+});

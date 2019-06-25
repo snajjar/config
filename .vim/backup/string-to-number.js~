@@ -1,0 +1,34 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+/**
+ *  A simple vector substraction module for DualBox.
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var StringToNumber = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.parallel = false;
+    this.async = false;
+};
+StringToNumber.prototype = Object.create(DualBox.Module.prototype);
+StringToNumber.prototype.constructor = StringToNumber;
+
+// [Abstract] See DualBox.Module
+StringToNumber.prototype.compute = function(input, response){
+
+    var res = parseFloat(input.s);
+    if(res === NaN){
+        res = null;
+    }
+
+    var output = {
+        x : res
+    };
+
+    response.send(output);
+};
+
+module.exports = StringToNumber;

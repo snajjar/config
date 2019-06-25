@@ -1,0 +1,29 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+/**
+ *  Computes the euclidean modulo
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var MathEuclideanModulo = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.parallel = false;
+    this.async = false;
+};
+MathEuclideanModulo.prototype = Object.create(DualBox.Module.prototype);
+MathEuclideanModulo.prototype.constructor = MathEuclideanModulo;
+
+// [Abstract] See DualBox.Module
+MathEuclideanModulo.prototype.compute = function(input, response){
+
+    var output = {
+      n : input.n1%input.n2
+    };
+
+    response.send(output);
+};
+
+module.exports = MathEuclideanModulo;

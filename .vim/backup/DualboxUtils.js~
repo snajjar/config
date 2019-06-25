@@ -1,0 +1,35 @@
+class DualboxUtils {
+    // return the short name of a dualbox package: "@dualbox/dualbox-core-if" => "if"
+    shortName(packageName) {
+        var str = packageName;
+        str = str.replace('@dualbox/', '');
+        str = str.replace('dualbox-core-', '');
+        str = str.replace('dualbox-lib-', '');
+        str = str.replace('dualbox-ui-', '');
+        str = str.replace('dualbox-module-', '');
+        return str
+    }
+
+    randomString(len) {
+        // converts a single byte to a hex string
+        function byteToHex(byte) {
+            return ('0' + byte.toString(16)).slice(-2);
+        }
+        var arr = new Uint8Array((len || 40) / 2);
+        window.crypto.getRandomValues(arr);
+        return [].map.call(arr, byteToHex).join("");
+    }
+
+    // return true if package is an UI
+    isUI(packageName) {
+        return packageName.indexOf('dualbox-ui-') !== -1;
+    }
+
+    // return true if package is a Module
+    isModule(packageName) {
+        return packageName.indexOf('dualbox-module-') !== -1 ||
+            packageName.indexOf('dualbox-core-') !== -1;
+    }
+}
+
+export default new DualboxUtils();

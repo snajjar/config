@@ -1,0 +1,123 @@
+#!/bin/bash
+
+ENV="local"
+BUILD_LOCATION="local"
+FORCE=false
+
+function installLocalDependencies () {
+    # install meteor
+    curl https://install.meteor.com/ | sh
+
+    # install mupx
+    sudo npm install -g mupx
+    sudo npm install -g md5-file
+}
+
+function runServer () {
+    (cd app && LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 meteor --settings settings/local.json --allow-incompatible-update)
+}
+
+function debugServer () {
+    (cd app && LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 MONGO_URL="mongodb://meteor:web1meteor@cockney.5.mongolayer.com:10176,cockney.4.mongolayer.com:10176/production?replicaSet=set-5710b3406c18212b4100056c" meteor --settings settings/alpha.json)
+}
+
+function deployServer () {
+    if [ "$ENV" = "local" ]
+    then
+        echo "You must select dev, beta or prod environment with -e option to deploy"
+    else
+        /bin/bash deploy.sh $ENV $BUILD_LOCATION
+    fi
+}
+
+function updateDB () {
+        node update_db/update.js $1 $ENV $FORCE
+}
+
+function commandDB () {
+    echo "Connecting to mongoDB $ENV"
+
+    if [ "$ENV" = "prod" ]
+    then
+        echo "No interface to connect to production DB."
+    elif [ "$ENV" = "beta" ]
+    then
+        ssh meteor@www.podometric.com -t "PS1='$PS1'; exec bash -c 'mongo podiatry'"
+    else
+        cd app
+        meteor mongo
+        cd ..
+    fi
+}
+
+function help () {
+    echo "${0} [-e env] [-b local|remote] [-i|-r|-d|-h|-u|-g|-f|-m mongocommand]"
+    echo "-i install all dependencies for local development"
+    echo "-r run a local meteor server (on port 3000)"
+    echo "-g run a local debug meteor server (on port 3000)"
+    echo "-d deploy to online version"
+    echo "-e specify the environment for the command [dev/prod]. use with -u or -x"
+    echo "-b specify where to build the bundle"
+    echo "-u [path] update insole database with the files on the specified folder. Specify the environment (dev/prod) with -e"
+    echo "-m Open a mongo shell. Specify the environment (dev/prod) with -e"
+    echo "-h for help"
+}
+
+# parse arguments
+while getopts ":fu:e:b:mirgdh" opt; do
+  case $opt in
+    i)
+        installLocalDependencies
+        exit 0;
+        ;;
+    r)
+        runServer
+        exit 0;
+        ;;
+    d)
+        deployServer
+        exit 0;
+        ;;
+    g)
+        debugServer
+        exit 0;
+        ;;
+    h)
+        help
+        exit 0;
+        ;;
+    u)
+        updateDB $OPTARG
+        exit 0;
+        ;;
+    e)
+        ENV=$OPTARG
+        ;;
+    b)
+        BUILD_LOCATION=$OPTARG
+        ;;
+    m)
+        commandDB
+        exit 0
+        ;;
+    f)
+        FORCE=true
+        ;;
+    \?)
+        echo "Invalid option: -$OPTARG" >&2
+        help
+        ;;
+    :)
+        echo "-u required a path argument (folder containing insole patterns)"
+        echo "-e required a env argument (dev or prod)"
+        exit 0;
+  esac
+done
+
+# if no argument, output help
+if [ $OPTIND -eq 1 ]
+then
+    echo "You must enter at least one option."
+    help
+    exit
+fi

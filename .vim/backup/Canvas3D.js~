@@ -1,0 +1,1422 @@
+import { $, env, UIComponent, Widget3DCamera, Error } from '@dualbox/dualbox';
+import { Box2, Box3, Vector2, Vector3, Face3, WebGLRenderer, Scene, Group, Color, DirectionalLight, TextureLoader, HemisphereLight, AmbientLight, GridHelper, Raycaster, Geometry, Mesh, MeshBasicMaterial, Object3D, CameraMan, Octree, Line, RenderPass, EffectComposer, SSAOPass, SSAARenderPass, ShaderPass, CopyShader, SMAAPass} from '@dualbox/dualbox-lib-xthree';
+import{ SSAO96Pass } from "@dualbox/dualbox-lib-three-ssao-96";
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+const pkgDesc = require('../package.json');
+const Overlays = require('./utils/Overlays');
+const BackgroundRenderer = require('./utils/BackgroundRenderer');
+const elementResizeDetectorMaker = require("element-resize-detector");
+
+
+
+// for bundle compilation
+if( env.browser ) {
+    require('./Canvas3D.css'); // for bundle compilation
+}
+
+
+/**
+*   A 3D Canvas class with a 3D scene etc...
+*   Init attributes are :
+*   grid : true/false to display a grid or not
+*   loadingStyle : fullscreen or ??? // Deprecated?
+*   camDist : distance of the camera from the center
+*   camPos : a complex object defining the camera position. Can be get from the CameraMan class (if needed for some setup).
+*   camTargetMode : the mode of targeting for the camera. Must be TARGET_0 or TARGET_SMART.
+*   mouse : mouse control. Use the click number ("0", "1", "2") or "wheel",
+*           to decide what to bind to this.
+*           Possible controls are : "rotateCam", "translateCam", "zoomCam", "zoomTargetCam", "smartZoomOriginCam", "smartZoomCam"
+*   lights : array of lights with format
+*            {
+*               type : "directional"/"point"/"hemisphere"/"ambient",
+*               color : the light color, default is white
+*               intensity : the light intensity, default is 1,
+*               position : Position of the light.
+*               decay : only for point light,
+*               distance : only for point light
+*            }
+*/
+class Canvas3D extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+
+        this.div = null;
+        this._errDiv = null;
+
+        // for requestAnimationFrame
+        this._renderFunc = this._render.bind(this)
+
+        // 3D stuff
+        this.cameraMan = null;
+        this.meshGroup = null;
+        this.widgetGroup = null;
+        this.scene = null;
+        this.action = "idle";
+        this.container = null;
+        this.renderer = null;
+        this.bgSettings = null;
+
+        // Widget3D
+        this.widgets = {};
+        this.widgetsMaster = null;
+
+        // fps tracking
+        this.lastRenderTime = null; // date at which the last render was done
+        this.lastRendersTimes = []; // keep the 60 last renders times
+
+        this.bgSettings = {
+            centerColor:0xeeeeee,
+            borderColor:0xffffff,
+            shading: "exp",
+            noise:0.0
+        };
+
+        // Render infos
+        this._bgReady = false;
+        this._bgLoading = false;
+        this._bgTexture = null;
+
+        // Postprocessing
+        this.renderPass = null;
+        this.ssaaRenderPass = null;
+        this.ssaoPass = null;
+        this.copyPass = null;
+
+        // Under mouse data (may not need to be kept)
+        this._canvasX;
+        this._canvasY;
+        // Of the form :
+        //  {
+        //      type: string, can be "background", "widget", "scene"
+        //  }
+        this._underMouse = null;
+
+        this._lastTapStart = [null,null];
+        this._lastTapEvent = [null,null];
+
+        this._longTouch = null;
+        this._longTouchEvent = null;
+        this._touchFixed1 = null;
+        this._touchFixedEvent = null;
+
+        this._mousedownfixed = {};
+
+        // This is buffering mouse move events with the given time (in ms)
+        // for each buffered time, the mousemove events will be stacked and
+        // only the last of the interval will be sent
+        this._bufferedMoves = {
+            mousedown:{},
+            mousemove:{},
+            mouseup:{},
+            dblclick:{},
+            touchstart:{},
+            touchmove:{},
+            touchend:{}
+        };
+        var self = this;
+        Object.keys(this._bufferedMoves).forEach(function (key){
+            var evt = self._bufferedMoves[key];
+            for(var i=0; i<self.attr.bufferIntervals.length; ++i){
+                var t = self.attr.bufferIntervals[i];
+                evt[t] = {
+                    interval:null,
+                    events:[]
+                };
+            }
+        });
+    }
+
+    registerEvents() {
+        super.registerEvents();
+
+        // register some canvas input events
+        this.registerUIEvent("screenshot", this.onScreenshot.bind(this));
+        this.registerUIEvent("build",      this.onTrigger.bind(this));
+        this.registerUIEvent("hide",       this.hide.bind(this));
+        this.registerUIEvent("show",       this.show.bind(this));
+    }
+
+    initialize() {
+        super.initialize();
+        this.initialized = false; // reset to false
+
+
+        var that = this;
+        $(document).ready(function() {
+            if( !that.initialized ) {
+                that.resize();
+                that.init3D();
+                that._renderFrame();
+
+                // initialize all registered widgets which may not have been initialized.
+                Object.keys(that.widgets).forEach(function (key){
+                    var w = that.widgets[key];
+                    if(!w.isInitialized()){
+                        w.initialize();
+                    }
+                });
+            }
+        });
+    }
+
+    // init an array of lights and attach them to parent.
+    // Parent is typically the camera or the scene.
+    initLights(json_lights){
+        var lights = [];
+        for(var i=0; i<json_lights.length; ++i){
+            var lt = json_lights[i];
+            var light = null;
+            var l_intensity = lt.intensity === undefined ? 1.0 : lt.intensity;
+            var l_color =
+                    lt.color === undefined ?
+                        new Color(1,1,1) :
+                        (typeof lt.color === "number" ?
+                            new Color(lt.color) :
+                            (new Color(lt.color.r, lt.color.g, lt.color.b))
+                        );
+            var l_position = lt.position === undefined ? new Vector3(0,0,-1) : new Vector3(lt.position.x, lt.position.y,lt.position.z);
+            switch(lt.type.toLowerCase()){ // be case resilient
+                case "directional":
+                case "directionallight":
+                    var light = new DirectionalLight(
+                        l_color,
+                        l_intensity
+                    );
+                    light.position.copy(l_position);
+                break;
+                case "hemisphere":
+                case "hemispherelight":
+                    var light = new HemisphereLight(
+                        l_color,
+                        l_intensity
+                    );
+                    light.position.copy(l_position);
+                break;
+                case "ambient":
+                case "ambientlight":
+                    var light = new AmbientLight(
+                        l_color,
+                        l_intensity
+                    );
+                break;
+                case "point":
+                case "pointlight":
+                    var light = new AmbientLight(
+                        l_color,
+                        l_intensity
+                    );
+                    light.distance = lt.distance;
+                    light.decay = lt.decay;
+                break;
+            };
+            if(light === null){
+                throw new Error("Unknown light type : " + lt.type+ ". Hint : careful with");
+            }
+            lights.push(light);
+        }
+        return lights;
+    }
+
+    init3D() {
+        var self = this;
+        var that = this;
+        if( !this.initialized ) {
+            this.info("INIT 3D");
+
+            if( !this.checkWebGL() ) {
+                this._error = true;
+                this.initialized = true;
+                $(this.div).append( $(this._errDiv) );
+                return;
+            }
+
+            var canvas = this.getCanvas();
+            if( canvas === null ) {
+                throw "Can not init when canvas is not defined !";
+            }
+            var width = $(canvas).width();
+            var height = $(canvas).height();
+            this.renderer = new WebGLRenderer( { antialias: true, canvas: this.getCanvas() } );
+            this.renderer.setClearColor( 0xffffff );
+            this.renderer.setPixelRatio( window.devicePixelRatio );
+            this.renderer.setSize( width, height );
+            this.renderer.autoClear = false;
+
+            this.bgSettings.screenWidth = width;
+            this.bgSettings.screenHeight = height;
+            this.bgSettings.noise = 0;
+            if(this.attr.background){
+                var bg = this.attr.background;
+                if(bg.color){
+                    this.bgSettings.centerColor = (new Color()).fromJSON(bg.color).getHex();
+                    this.bgSettings.borderColor = (new Color()).fromJSON(bg.color).getHex();
+                }else if(bg.radial){
+                    this.bgSettings.centerColor = (new Color()).fromJSON(bg.radial.center).getHex();
+                    this.bgSettings.borderColor = (new Color()).fromJSON(bg.radial.border).getHex();
+                }
+                this.bgSettings.noise = this.attr.background.noise || 0;
+                this.renderer.setClearColor( this.bgSettings.borderColor );
+            }
+
+            let scene = new Scene();
+
+            this.cameraMan = new CameraMan("mainCameraMan", this.renderer.domElement);
+            this.cameraMan.setPerspectiveCameraAllParameters(45, width / height, 0.1, 100000 );
+            this.cameraMan.setOrthographicCameraAllParameters(-width/2,width/2,height/2,-height/2, 1, 100000 );
+            this.cameraMan.setCameraType('PerspectiveCamera');
+            this.cameraMan.setDistToTarget(this.attr.camDist ? this.attr.camDist : 200);
+            this.cameraMan.attachToObject3D(scene);
+
+            if(this.attr.camPos !== undefined){
+                this.cameraMan.setPosition(this.attr.camPos);
+            }
+
+            let mesh_group = new Group();
+            scene.add( mesh_group );
+            let widget_group = new Group();
+            scene.add( widget_group );
+            let light_group = new Group();
+            scene.add( light_group );
+
+            let camera_lights = new Group();
+            this.cameraMan.attachToCamera(camera_lights);
+
+            this._overlays = new Overlays();
+
+            if(this.attr.lights !== undefined){
+                var lights = this.initLights(this.attr.lights);
+                for(var i=0; i<lights.length; ++i){
+                    scene.add(lights[i]);
+                }
+            }
+            if(this.attr.cameraLights !== undefined){
+                var lights = this.initLights(this.attr.cameraLights);
+                for(var i=0; i<lights.length; ++i){
+                    this.cameraMan.attachLightToCamera(lights[i]);
+                }
+            }
+
+            // Add pass to effect composer
+            this.effectComposer = new EffectComposer( this.renderer );
+            if(this.attr.ssaa && this.attr.ssaa.active){
+				this.ssaaRenderPass = new SSAARenderPass( this.scene, this.cameraMan.getCamera(), this.renderer.getClearColor(), 1);
+				this.ssaaRenderPass.unbiased = false;
+                this.ssaaRenderPass.sampleLevel = this.attr.ssaa.sampleLevel || 2;
+                this.ssaaRenderPass.unbiased = true;
+				this.effectComposer.addPass( this.ssaaRenderPass );
+
+				this.copyPass = new ShaderPass( CopyShader );
+                this.copyPass.renderToScreen = true;
+				this.effectComposer.addPass( this.copyPass );
+
+                // SSAA pass is creating visible artefacts on the background gradient.
+                // We add noise to make those artefacts less visible.
+                this.bgSettings.noise = Math.max(this.bgSettings.noise, 0.025);
+            }else{
+                // Setup render pass
+                this.renderPass = new RenderPass( this.scene, this.cameraMan.getCamera() );
+                this.effectComposer.addPass( this.renderPass );
+                // Setup SSAO pass
+                this.ssaoPass = null;
+                if(this.attr.ssao && this.attr.ssao.active){
+                    this.ssaoPass = new SSAO96Pass( this.scene, this.cameraMan.getCamera() );
+                    this.ssaoPass.radius = this.attr.ssao.radius !== undefined ? this.attr.ssao.radius : pkgDesc.dualbox.attr.ssao.radius;
+                    this.ssaoPass.aoClamp = this.attr.ssao.aoClamp !== undefined ? this.attr.ssao.aoClamp : pkgDesc.dualbox.attr.ssao.aoClamp;
+                    this.ssaoPass.lumInfluence = this.attr.ssao.lumInfluence !== undefined ? this.attr.ssao.lumInfluence : pkgDesc.dualbox.attr.ssao.lumInfluence;
+                    this.ssaoPass.noiseAmount = this.attr.ssao.noiseAmount !== undefined ? this.attr.ssao.noiseAmount : pkgDesc.dualbox.attr.ssao.noiseAmount;
+                    this.ssaoPass.renderToScreen = false;
+                    this.effectComposer.addPass( this.ssaoPass );
+
+                    this.smaaRenderPass = new SMAAPass( width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio() );
+                    this.smaaRenderPass.unbiased = false;
+                    this.smaaRenderPass.renderToScreen = true;
+                    this.effectComposer.addPass( this.smaaRenderPass );
+                }else{
+                    this.renderPass.renderToScreen = true;
+                }
+            }
+
+            if(this.bgSettings){
+                this._background = new BackgroundRenderer(
+                    this.bgSettings
+                );
+            }
+
+            // backgroup grids // TODO : Should be a widget
+            if( this.attr.grid ) {
+                console.warn("Grid attribute on canvas is deprecated");
+                var helper = new GridHelper( 80, 10 );
+                helper.rotation.x = Math.PI / 2;
+                widget_group.add( helper );
+            }
+
+            this.setupMouseInterface();
+            this._mouseDown = false;
+            this._mouseX = 0;
+            this._targetRotation = 0;
+            this._mouseXOnMouseDown = 0;
+            this._error = false;
+
+            // add camera, scene and group to states
+            this.action = "idle";
+            this.widgetGroup = widget_group;
+            this.meshGroup = mesh_group;
+                this.sceneAABB = new Box3(); // Scene bounding box, can be used for mouse event management etc...
+            this.lightGroup = light_group;
+            this.camLightGroup = camera_lights;
+            this.scene = scene;
+
+            // append render element to container
+            this.div.append( this.renderer.domElement );
+
+            this.initialized = true;
+
+            // init Widget3D
+
+            Object.keys(this.widgets).forEach(function (key) {
+               self.widgets[key].initialize();
+            });
+        }
+    }
+
+    getSize(){
+        var innerContainer = $('#' + this.id + "-container");
+        return {
+            width:innerContainer.innerWidth(),
+            height:innerContainer.innerHeight()
+        };
+    }
+
+    resize(event) {
+        if( this.container ) {
+            var newWidth  = this.container.clientWidth ? this.container.clientWidth : this.container[0].clientWidth;
+            var newHeight = this.container.clientHeight ? this.container.clientHeight : this.container[0].clientHeight;
+            console.log("resize to " + newWidth + ", " + newHeight);
+
+            // resize the container accordingly
+            var innerContainer = $('#' + this.id + "-container");
+            innerContainer.css('width', newWidth+'px');
+            innerContainer.css('height', newHeight+'px');
+
+            // internal available space
+            var width  = innerContainer.innerWidth();
+            var height = innerContainer.innerHeight();
+
+            if( this.cameraMan ) {
+                this.cameraMan.setPerspectiveCameraParameter('aspect', width / height);
+            }
+            if( this.renderer ) {
+                this.renderer.setSize( width, height );
+                if(this.smaaRenderPass){
+                    this.smaaRenderPass.setSize( width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio() );
+                }
+                if(this.ssaaRenderPass){
+                    this.ssaaRenderPass.setSize( width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio() );
+                }
+                if(this.copyPass){
+                    this.copyPass.setSize( width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio() );
+                }
+                this._render();
+            }
+        }
+    }
+
+    ///////////////////////////////////////
+    // API for External Widget3D etc... //
+
+    // if null, will reset the default background
+    setBackground(bg) {
+        if(bg){
+            this.scene.background = bg;
+        }else{
+            if(this._bgTexture){
+                this.scene.background = this._bgTexture;
+            }else{
+                var self = this;
+                setTimeout(
+                    function(){
+                        self.setBackground(bg);
+                    },
+                    1
+                );
+            }
+        }
+    }
+
+    getCanvas() {
+        if( this.div === null ) {
+            return null;
+        }
+        return this.div.find('.Canvas3D')[0];
+    }
+
+    getCameraMan(){
+        return this.cameraMan;
+    }
+
+    getOverlays(){
+        return this._overlays;
+    }
+
+    // return renderer
+    getRenderer(){
+        return this.renderer;
+    }
+
+    getSceneAABB(){
+        return this.sceneAABB;
+    }
+
+    checkWebGL() {
+        var gl = null;
+        var canvas = this.getCanvas();
+
+        try { gl = canvas.getContext("webgl"); }
+        catch (x) { gl = null; }
+
+        if (gl == null) {
+            try { gl = canvas.getContext("experimental-webgl"); experimental = true; }
+            catch (x) { gl = null; }
+        }
+        return gl!=null;
+    }
+
+    registerWidget3D(w){
+        if( this.isInitialized() && !w.isInitialized()) {
+            w.initialize();
+        }
+        this.widgets[w.id] = w;
+    }
+
+    // All widget stop reacting to canvas event while
+    // one of them (the master), is operating.
+    // Especially useful for things like dragging.
+    enslaveWidget3D(master){
+        this.widgetsMaster = master;
+        var that = this;
+        Object.keys(this.widgets).forEach(function (key) {
+            if(that.widgets[key] !== master){
+                that.widgets[key].setSlave();
+            }
+        });
+    }
+
+    freeWidget3D(master){
+        if(this.widgetsMaster !== master){
+            throw "Something wrong, cannot release widgets from a master which is not the master.";
+        }
+        var that = this;
+        Object.keys(this.widgets).forEach(function (key) {
+            if(that.widgets[key] !== master){
+                that.widgets[key].setFree();
+            }
+        });
+        this.widgetsMaster = null;
+    }
+
+    // DEVNOTE>Widget3DCameraMan : this should be removed
+    setupMouseInterface(){
+        this._mouseInterface = {};
+        if(this.attr.mouse !== undefined){
+            this._mouseInterface = JSON.parse(JSON.stringify(this.attr.mouse));
+        }else{
+            this._mouseInterface = {
+                "0":"rotateCam",
+                "2":"translateCam",
+                "wheel":"smartZoomCam"
+            }
+        }
+    }
+
+    setMeshToScene( object3d, name ) {
+        var self = this;
+
+        if( this.isInitialized() ) {
+            if( !this._error ) {
+                this.log("Adding to scene object3d " + object3d.id + " (name: " + name + ", uuid: " + object3d.uuid + ")");
+
+                var rm_obj = this.scene.getObjectByName( name );
+                if(rm_obj){
+                    rm_obj.disposeOnCascade();
+                    this.meshGroup.remove(rm_obj);
+                }
+                var input_node = new Object3D();
+                input_node.name = name;
+                input_node.add(object3d);
+                input_node.updateMatrixWorld();
+                this.meshGroup.add( input_node );
+
+                this.sceneAABB.setFromObject(this.meshGroup).getSize(new Vector3());
+
+                // Force a render to ensure display asap.
+                this._render();
+            }
+        }
+        else {
+            setTimeout(function() {
+                this.setMeshToScene( object3d, name);
+            }.bind(this), 0);
+        }
+    }
+
+    setLightsToScene(lights){
+        if( this.isInitialized() ) {
+            if( !this._error ) {
+                console.log("Adding lights to scene...");
+                while(this.lightGroup.children.length !== 0){
+                    this.lightGroup.remove(this.lightGroup.children[0]);
+                }
+                for(var i=0; i<lights.length; ++i){
+                    lights[i].name = "light_"+i;
+                    this.lightGroup.add(lights[i]);
+                }
+                this.lightGroup.updateMatrixWorld();
+            }
+        }
+        else {
+            setTimeout(function() {
+                this.setLightsToScene( lights );
+            }.bind(this), 0);
+        }
+    }
+    setCamLightsToScene(lights){
+        if( this.isInitialized() ) {
+            if( !this._error ) {
+                console.log("Adding lights to scene...");
+                while(this.camLightGroup.children.length !== 0){
+                    this.camLightGroup.remove(this.camLightGroup.children[0]);
+                }
+                for(var i=0; i<lights.length; ++i){
+                    lights[i].name = "camlight_"+i;
+                    this.camLightGroup.add(lights[i]);
+                }
+                this.camLightGroup.updateMatrixWorld();
+            }
+        }
+        else {
+            setTimeout(function() {
+                this.setLightsToScene( lights );
+            }.bind(this), 0);
+        }
+    }
+
+    // when all the data is there, display it in the scene
+    onReady() {
+        var inkeys = Object.keys(this.inputValid);
+        for(var i=0; i<inkeys.length; ++i){
+            if( this.inputValid[inkeys[i]] && this.inputValue[inkeys[i]] !== null){
+                let inputName = inkeys[i];
+
+                switch(inputName){
+                    case "mesh":
+                    case "snode":
+                        // get the result and build the object
+                        var object3d = this.inputValue[inkeys[i]];
+                        this.setMeshToScene( object3d, "canvas-input-"+inputName);
+                    break;
+                    case "lights":
+                        this.setLightsToScene(this.inputValue[inkeys[i]]);
+                    break;
+                    case "cameraLights":
+                        this.setCamLightsToScene(this.inputValue[inkeys[i]]);
+                    break;
+                    default:
+                        throw "Error : unknown inputName in Canvas3D."
+                    break;
+                }
+
+                // invalid input now
+                this.inputValid[inkeys[i]] = false;
+            }
+        }
+
+        // re-set all groups to visible
+        this.widgetGroup.visible = true;
+        this.meshGroup.visible = true;
+
+        // emit DISPLAY event
+        this.emit("display");
+
+        // We're done, trigger all UI events
+        this.trigger({});
+    }
+
+    onTrigger(data) {
+        super.onTrigger(data);
+
+        var eventData = data.args;
+        if( eventData ) {
+            if( eventData.hide === "widgets" ) {
+                this.widgetGroup.visible = false;
+            }
+            else if( eventData.hide === "scene" ) {
+                this.meshGroup.visible = false;
+            }
+            else if( eventData.hide === "all" ) {
+                this.widgetGroup.visible = false;
+                this.meshGroup.visible = false;
+            }
+            else {
+                // everything stays visible
+            }
+        }
+    }
+
+    /**
+     *  Check if the skeleton is fully contained in the canvas.
+     *  This is an approximation using AABB.
+     *  @return {boolean} false if the skeleton AABB is empty
+     */
+    isSceneGraphOnCanvas() {
+        var aabb = (new Box3()).setFromObject(this.meshGroup);
+        // Check the position of the object on the canvas
+        var obj_on_canvas = false;
+        if(!aabb.isEmpty())
+        {
+            // TODO : we should also check that the aabb is in front of the camera...
+            var screen_zone = this.cameraMan.projectBox(aabb);
+            var screen_box = new Box2(
+                new Vector2(-1, -1),
+                new Vector2( 1,  1)
+            );
+            obj_on_canvas = screen_box.containsBox(screen_zone);
+        }
+        return obj_on_canvas;
+    }
+
+    /**
+     *  Get a Dom element offset in the page
+     *  @param {Object} el The dom element
+     *  @return {{top:number,left:number}}
+     */
+    getElementOffset( el ) {
+        var _x = 0;
+        var _y = 0;
+        while( el && !isNaN( el.offsetLeft ) && !isNaN( el.offsetTop ) ) {
+            _x += el.offsetLeft;
+            _y += el.offsetTop;
+            el = el.offsetParent;
+        }
+        return { top: _y, left: _x };
+    }
+
+
+    computeMouseTouchData(e){
+        if( this.renderer ) {
+            // Apply the canevas position offset to get
+            // pageX and pageY relative to the upper left corner of the canvas
+            var offsets = this.getElementOffset(this.renderer.domElement);
+            this._canvasX = [e.pageX - offsets.left];
+            this._canvasY = [e.pageY - offsets.top];
+
+            // touch case
+            if( e.originalEvent && e.originalEvent.touches && e.originalEvent.touches[0] ) {
+                var ts = e.originalEvent.touches;
+                this._canvasX = [];
+                this._canvasY = [];
+                for(var i=0;i<ts.length;++i){
+                    this._canvasX.push(ts[i].pageX - offsets.left)
+                    this._canvasY.push(ts[i].pageY - offsets.top)
+                }
+            }
+
+
+
+            var ray = this.cameraMan.getRay(this._canvasX[0] , this._canvasY[0]);
+            var raycaster = new Raycaster(ray.origin, ray.direction);
+
+            // TODO Optim for large meshes :
+            //      Count the number of listeners for each group and avoid
+            //      raycasting when noone listen to hit.
+
+            var mesh_inters = raycaster.intersectObjects( this.meshGroup.children, true );
+            var widget_inters = raycaster.intersectObjects( this.widgetGroup.children, true );
+
+            // Filter all intersection with lines as it is not stable in THREE
+            var noline = [];
+            for(var i=0; i<mesh_inters.length; ++i){
+                if(!(mesh_inters[i].object instanceof Line)){
+                    noline.push(mesh_inters[i]);
+                }
+            }
+            mesh_inters = noline;
+            noline = [];
+            for(var i=0; i<widget_inters.length; ++i){
+                if(!(widget_inters[i].object instanceof Line)){
+                    noline.push(widget_inters[i]);
+                }
+            }
+            widget_inters = noline;
+
+            var res = {
+                first:"background",
+                on:[], // will contain the subsequent hierarchy (like ["widget", <widget_id>], or ["scene", <node_parent1_name>, <node_parent2_name>, <hit_mesh_name>])
+                objects:mesh_inters,
+                widgets:widget_inters
+            };
+
+            if(mesh_inters.length === 0){
+                if(widget_inters.length === 0){
+                    res.on.push("background");
+                }else{
+                    res.on.push("widget");
+                    var obj = widget_inters[0].object;
+                    var tags = [];
+                    while(obj !== this.widgetGroup){
+                        if(obj.name !== ""){
+                            Array.prototype.push.apply(tags, obj.name.split("#").reverse());
+                        }
+                        obj = obj.parent;
+                    }
+                    tags.reverse();
+                    Array.prototype.push.apply(res.on,tags);
+                    res.first = widget_inters[0];
+                }
+            }else{
+                if(widget_inters.length === 0 || widget_inters[0].distance > mesh_inters[0].distance){
+                    res.on.push("scene");
+                    var obj = mesh_inters[0].object;
+                    var tags = [];
+                    // grandparent must not be meshgroup or we stop.
+                    while(obj.parent !== this.meshGroup){
+                        if(obj.name !== ""){
+                            Array.prototype.push.apply(tags, obj.name.split("#").reverse());
+                        }
+                        obj = obj.parent;
+                    }
+                    tags.reverse();
+                    Array.prototype.push.apply(res.on,tags);
+                    res.first = mesh_inters[0];
+                }else{
+                    res.on.push("widget");
+                    var obj = widget_inters[0].object;
+                    var tags = [];
+                    while(obj !== this.widgetGroup){
+                        if(obj.name !== ""){
+                            Array.prototype.push.apply(tags, obj.name.split("#").reverse());
+                        }
+                        obj = obj.parent;
+                    }
+                    tags.reverse();
+                    Array.prototype.push.apply(res.on,tags);
+                    res.first = widget_inters[0];
+                }
+            }
+
+            this._underMouse = res;
+        }
+    }
+
+    dispatchEventsToWidgets(event, name){
+
+        if(!this.initialized){
+            return;
+        }
+
+        this.computeMouseTouchData(event, name);
+
+        var mouse_data = {
+            canvasX:this._canvasX[0],
+            canvasY:this._canvasY[0],
+            touchesX:this._canvasX,
+            touchesY:this._canvasY,
+            underMouse:this._underMouse,
+            mouseDown : true
+        };
+
+        var self = this;
+        var dispatchOne = function(surname){
+
+            // build event list from less specialized to more specialized
+            var cplx_event = surname;
+            var evts_list = [];
+
+            evts_list.push(cplx_event);
+
+            var is_touch = surname.search("touch") !== -1;
+            var simple_evts = {
+                "mousemove":true,
+                "mousewheel" : true,
+                "touchstart" : true,
+                "touchmove" : true,
+                "touchend" : true,
+                "dbltap":true,
+                "longtouch1":true,
+                "touchfixed1":true
+            };
+            if(!simple_evts[surname] && !is_touch && !(surname.search("buffered") === 0 && simple_evts[surname.split("_")[1]])){
+                cplx_event = surname + event.button;
+                evts_list.push(cplx_event);
+            }
+
+            var ons = mouse_data.underMouse.on;
+            for(var i=0; i<ons.length; ++i){
+                cplx_event += ":"+ons[i];
+                evts_list.push(cplx_event);
+            }
+
+            var i=evts_list.length-1;
+            var stopped = false;
+            while(i>=0 && !stopped){
+                var emit_data = {
+                    htmlEvent:event,
+                    cvs3dEvent:{
+                        mouseData:mouse_data,
+                        name:evts_list[i],
+                        stopped:false,
+                        stopPropagation: function(){
+                            this.stopped = true;
+                        },
+                        doPropagate: function(){
+                            this.stopped = false;
+                        }
+                    }
+                };
+                self.emit(evts_list[i],emit_data);
+                stopped = emit_data.cvs3dEvent.stopped;
+                i--;
+            }
+        }
+        if(name.search("touch") === 0){
+            var nt = event.originalEvent.touches.length;
+            switch(name){
+                case "touchstart" :
+                    dispatchOne(name);
+                    if(nt === 1){
+                        dispatchOne(name + nt);
+                    }else{
+                        dispatchOne("touchend" + (nt-1));
+                        dispatchOne(name + nt);
+                    }
+                break;
+                case "touchmove" :
+                    dispatchOne(name);
+                    dispatchOne(name+nt);
+                break;
+                case "touchend" :
+                    dispatchOne(name + (nt+1));
+                    if(nt !== 0){
+                        dispatchOne("touchstart" + nt);
+                    }
+                    dispatchOne(name);
+                break;
+                case "touchfixed1" :
+                    dispatchOne(name);
+                break;
+            };
+        }else{
+            dispatchOne(name);
+        }
+    }
+
+    handleBufferEvent(name){
+        var that = this;
+        Object.keys(this._bufferedMoves[name]).forEach(function (key) {
+            var buff = that._bufferedMoves[name][key];
+            var lapse = parseFloat(key);
+            if(buff.interval === null){
+                buff.interval = setInterval(function(){
+                        var buff = that._bufferedMoves[name][key];
+                        that.dispatchEventsToWidgets(buff.events[buff.events.length-1], "buffered"+lapse+"_"+name);
+                        clearInterval(buff.interval);
+                        buff.interval = null;
+                        buff.events = [];
+                    },
+                    lapse
+                );
+            }
+            buff.events.push(event);
+        });
+    }
+
+    onMouseDown(event) {
+        event.preventDefault();
+        this.handleBufferEvent("mousedown");
+        this.dispatchEventsToWidgets(event, "mousedown");
+        this._mousedownfixed[event.button] = true;
+    }
+
+    onDblClick(event){
+        event.preventDefault();
+        this.handleBufferEvent("dblclick");
+        this.dispatchEventsToWidgets(event, "dblclick");
+    }
+
+    onMouseUp(event) {
+        event.preventDefault();
+        this.handleBufferEvent("mouseup");
+        this.dispatchEventsToWidgets(event, "mouseup");
+        if(this._mousedownfixed[event.button]){
+            this.dispatchEventsToWidgets(event, "mouseupfixed");
+        }
+    }
+
+    onMouseMove(event) {
+        event.preventDefault();
+        this.handleBufferEvent("mousemove");
+        this.dispatchEventsToWidgets(event, "mousemove");
+        this._mousedownfixed = {};
+    }
+
+    _resetLastTapData(){
+        this._lastTapStart[0] = null;
+        this._lastTapStart[1] = null;
+        this._lastTapEvent[0] = null;
+        this._lastTapEvent[1] = null;
+    }
+    _resetlongTouch(){
+        clearTimeout(this._longTouch);
+        this._longTouch = null;
+        this._longTouchEvent = null;
+    }
+    _resetTouchFixed(){
+        this._touchFixed1 = false;
+        this._touchFixedEvent = null;
+    }
+    onTouchStart(event) {
+        event.preventDefault();
+        this.handleBufferEvent("touchstart");
+        this.dispatchEventsToWidgets(event, "touchstart");
+        var self = this;
+        if(event.originalEvent.touches.length == 1){
+
+            this._longTouch = setTimeout(
+                function(){
+                    self.dispatchEventsToWidgets(event, "longtouch1");
+                    self._longTouchEvent = event;
+                },
+                this.attr.longTouchTimeout
+            );
+
+            this._lastTapStart[1] = this._lastTapStart[0];
+            this._lastTapStart[0] = new Date().getTime();
+            this._lastTapEvent[1] = this._lastTapEvent[0];
+            this._lastTapEvent[0] = event;
+
+            this._touchFixed1 = true;
+            this._touchFixedEvent = event;
+        }else{
+            this._resetlongTouch();
+            this._resetLastTapData();
+            this._resetTouchFixed();
+        }
+    }
+
+    onTouchEnd(event) {
+        event.preventDefault();
+        this.handleBufferEvent("touchend");
+        this.dispatchEventsToWidgets(event, "touchend");
+        if(event.originalEvent.touches.length == 0){
+            if(  this._lastTapStart[0] !== null &&
+                this._lastTapStart[1] !== null &&
+                (new Date().getTime() - this._lastTapStart[1]) < 500){
+                this.dispatchEventsToWidgets(this._lastTapEvent[1], "dbltap");
+                this._resetLastTapData();
+            }
+
+            if(this._longTouchEvent !== null){
+               this.dispatchEventsToWidgets(this._longTouchEvent, "longtouchend1");
+            }
+            if(this._touchFixed1){
+                this.dispatchEventsToWidgets(this._touchFixedEvent, "touchfixed1");
+            }
+        }
+        this._resetlongTouch();
+        this._resetTouchFixed();
+    }
+
+    onTouchMove(event) {
+        event.preventDefault();
+        this.handleBufferEvent("touchmove");
+        this.dispatchEventsToWidgets(event, "touchmove");
+
+        this._resetlongTouch();
+        this._resetLastTapData();
+        this._resetTouchFixed();
+    }
+
+    onWheel(e) {
+        var event = e.originalEvent;
+        // Check for an actual mousewheel event catched.
+        // Only prevent default and process if relevant
+        var found = false;
+        Object.keys(this.listeners).forEach(function(key){
+            if(key.substring(0,10) === "mousewheel"){
+                found = true;
+            }
+        });
+        if(found){
+            event.preventDefault();
+            this.dispatchEventsToWidgets(event, "mousewheel");
+        }
+    }
+
+    onContextMenu(e) {
+        e.preventDefault();
+    }
+
+    /**
+     * @return Images white where objects lies, black otherwise.
+     *         Dev note : transparent objects will have 100% opacity...
+     *                    it would be better to have something like grey shade corresponding to alpha channel everywhere.
+     *                    Beter but not enouhgt of course...
+     */
+    screenshot_mask(){
+
+        // Used to reset the material when it has been changed for screenshot purposes.
+        var mat_map = [];
+
+        this.renderer.setClearColor(0x000000);
+        this.renderer.clear();
+        this.meshGroup.traverse(function(obj){
+            if(obj instanceof Mesh){
+                if(obj.material.transparent === false || obj.material.opacity !== 0){
+                    mat_map.push({obj:obj, mat:obj.material});
+                    obj.material = new MeshBasicMaterial( { color: 0xffffff, side:obj.material.side } );
+                }
+            }
+        });
+        this._renderPasses();
+        this._overlays.render(this.renderer);
+
+        var render_cvs = this.renderer.domElement;
+        var img = render_cvs.toDataURL("image/png");
+
+        // reset materials
+        for(var i=0; i<mat_map.length; ++i){
+            mat_map[i].obj.material = mat_map[i].mat;
+        }
+
+        this._render();
+
+        return img;
+    }
+
+    onScreenshot(e) {
+        return this.screenshot(e.args, (imgData, dataURL) => {
+            this.emit("screenshot", { "imgData": imgData, "dataURL": dataURL });
+        });
+    }
+
+    /**
+     *  DEPRECATED : the only customer to use this for creenshot should be Thea Jewelry, all others are supposed to have a screenshot output now.
+     *
+     *   @param {number} params.backColor Color of the background, as an hex.
+     *                   If null, transparency will be used, if undefined, screenshot will be taken as is.
+     *  @pram callback : function(imageData,dataUrl) The final screenshot as an imageData and as a dataURL)
+     */
+    screenshot(params, callback){
+
+        var that = this;
+
+        var getImageDataFromDataURL = function(strDataURL, width, height, callback){
+            var myCanvas = document.createElement('canvas');
+            myCanvas.width = width;
+            myCanvas.height = height;
+            var ctx = myCanvas.getContext('2d');
+            var img = new Image;
+            img.onload = function(){
+                ctx.drawImage(img,0,0); // Or at whatever offset you like
+                var imgData = ctx.getImageData(0,0,myCanvas.width,myCanvas.height);
+                callback(imgData);
+            };
+            img.src = strDataURL;
+        };
+        var getDataURLFromImageData = function(imgData){
+            var myCanvas = document.createElement('canvas');
+            myCanvas.width = imgData.width;
+            myCanvas.height = imgData.height;
+            var ctx = myCanvas.getContext('2d');
+            ctx.putImageData(imgData,0,0);
+            return myCanvas.toDataURL();
+        };
+
+        // c is the context of canvas with dimension sourceDim,
+        var getConstRatioImageData = function(c, sourceDim, dratio){
+            var sratio = sourceDim[0]/sourceDim[1];
+            // draw the object horizontally or vertically aligned
+            if( sratio > dratio ) {
+                // height is the limit
+                var swidth_to_keep = Math.round(dratio * sourceDim[1]);
+                var margin = Math.round((sourceDim[0] - swidth_to_keep)/2);
+                return c.getImageData(
+                    margin,
+                    0,
+                    swidth_to_keep,
+                    sourceDim[1]
+                );
+            }
+            else if( sratio < dratio ) {
+                // width is the limit
+                var sheight_to_keep = Math.round(sourceDim[0]/dratio);
+                var margin = Math.round((sourceDim[1] - sheight_to_keep)/2);
+                return c.getImageData(
+                    0,
+                    margin,
+                    sourceDim[0],
+                    sheight_to_keep
+                );
+            }
+            else {
+                return c.getImageData(0,0,sourceDim[0],sourceDim[1]);
+            }
+        };
+
+        var prev_cam_pos = this.cameraMan.getPosition();
+        if(params.camPos === "origin"){
+            // look for a cameraman widget3D
+            var wcam = null;
+            Object.keys(this.widgets).forEach(function(key){
+                if(that.widgets[key] instanceof Widget3DCamera){
+                    if(wcam !== null){
+                        console.warn("Several Camera managers are registered in this canvas. One will be randomly picked for screenshot. If this is an issue for you, please ask for an API extension.")
+                    }
+                    wcam = that.widgets[key];
+                }
+            });
+            this.cameraMan.setPosition(wcam.getInitialCameraPosition());
+        }else if(params.camPos !== undefined){
+            this.cameraMan.setPosition(params.camPos);
+        }
+
+        if(params === undefined){
+            params = {};
+        }
+        var bg_c = params.backColor;
+        var mask = null;
+
+        // Used to reset the material when it has been changed for screenshot purposes.
+        var mat_map = [];
+
+        if(bg_c === null){
+            mask = this.screenshot_mask();
+        }
+        this.renderer.clear();
+        if(bg_c !== undefined){
+            var ss_back = new BackgroundRenderer({
+                centerColor:bg_c,
+                borderColor:bg_c,
+                shading: "exp"
+            });
+            ss_back.render(this.renderer);
+        }else{
+            // Background rendering is done using a texture now.
+            //if(this._background){
+            //    this._background.render(this.renderer);
+            //}
+        }
+        this.renderer.render( this.scene, this.cameraMan.getCamera() );
+        this._overlays.render(this.renderer);
+
+        // Render passes are done, reset the camera
+        this.cameraMan.setPosition(prev_cam_pos);
+
+        var canvas = this.renderer.domElement;
+        var img = canvas.toDataURL("image/png");
+
+        this._render();
+
+        var dest_cvs = document.createElement('canvas');
+        dest_cvs.width = canvas.width;
+        dest_cvs.height = canvas.height;
+        var dest_cvs_ctx = dest_cvs.getContext( '2d' );
+
+        if(mask !== null){
+            var mask_img_data = null;
+            var img_data = null;
+            var doMaskAndfinish = function(){
+                if(img_data !== null && mask_img_data !== null){
+                    for (var i=0;i<img_data.data.length;i+=4)
+                    {
+                        img_data.data[i+3]=mask_img_data.data[i];
+                    }
+                    if(params.ratio !== undefined){
+                        dest_cvs_ctx.putImageData(
+                            img_data,
+                            0,0
+                        );
+                        img_data = getConstRatioImageData(
+                            dest_cvs_ctx,
+                            [canvas.width,canvas.height],
+                            params.ratio
+                        );
+                    }
+                    callback(img_data, getDataURLFromImageData(img_data));
+                }
+            };
+
+            getImageDataFromDataURL(mask,canvas.width,canvas.height,function(data){
+                mask_img_data = data;
+                doMaskAndfinish();
+            });
+            getImageDataFromDataURL(img,canvas.width,canvas.height,function(data){
+                img_data = data;
+                doMaskAndfinish();
+            });
+        }else{
+            getImageDataFromDataURL(img,canvas.width,canvas.height,function(data){
+                if(params.ratio !== undefined){
+                    dest_cvs_ctx.putImageData(
+                        data,
+                        0,0
+                    );
+                    data = getConstRatioImageData(
+                        dest_cvs_ctx,
+                        [canvas.width,canvas.height],
+                        params.ratio
+                    );
+                }
+                callback(data, getDataURLFromImageData(data));
+            });
+        }
+    }
+
+    _renderPasses(){
+        if(this.renderPass){
+            this.renderPass.scene = this.scene;
+            this.renderPass.camera = this.cameraMan.getCamera();
+        }
+
+        if(this.ssaaRenderPass){
+            this.ssaaRenderPass.scene = this.scene;
+            this.ssaaRenderPass.camera = this.cameraMan.getCamera();
+        }
+
+        if(this.ssaoPass){
+            this.ssaoPass.setScene(this.scene);
+            this.ssaoPass.setCamera(this.cameraMan.getCamera());
+        }
+        this.effectComposer.render();
+    }
+
+    // raf = requestAnimationFrame : true if we want to loop, false otherwise.
+    _render() {
+        if( this.renderer ) {
+            if(this._bgTexture){
+                // do not render while the background is not ready
+                this.renderer.clear();
+                this._renderPasses();
+
+                this._overlays.render(this.renderer);
+
+                // count fps
+                if(!this.lastRenderTime) {
+                    this.lastRenderTime = Date.now();
+                }
+                else {
+                    var delta = (Date.now() - this.lastRenderTime)/1000;
+                    this.lastRenderTime = Date.now();
+                    // only keep last 60 render times
+                    if( this.lastRendersTimes.length >= 60 ) {
+                        this.lastRendersTimes.splice(0, 1);
+                    }
+                    this.lastRendersTimes.push(delta);
+                }
+            }else{
+                if(!this._bgLoading){
+                    var canvas = document.createElement('canvas');
+                    canvas.height = this.renderer.domElement.height;
+                    canvas.width  = this.renderer.domElement.width;
+                    var bg_r = new WebGLRenderer( { antialias: true, canvas: canvas } );
+                    this._background.render(bg_r);
+
+                    var self = this;
+                    new TextureLoader().setCrossOrigin("anonymous").load( canvas.toDataURL("image/png"), function(res){
+                        self.scene.background = res;
+                        self._bgTexture = res;
+                        self._bgLoading = false;
+                    });
+
+                    this._bgLoading = true;
+                }
+            }
+        }
+    }
+
+    _renderFrame(){
+        this._render();
+        this._renderRequest = requestAnimationFrame(this._renderFrame.bind(this));
+    }
+
+    stop() {
+        cancelAnimationFrame(this._renderRequest);
+    }
+
+    fps() {
+        var sum = this.lastRendersTimes.reduce(function(pv, cv) { return pv + cv; }, 0);
+        return Math.round(1/(sum/60));
+    }
+
+    hide() {
+        $(this.div).hide();
+    }
+
+    show() {
+        $(this.div).show();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var canvas = new Canvas3D(pkgDesc, appDesc, attrs);
+        canvas.warn('New canvas3D instantiated');
+
+        // create canvas div and bind events
+        var cdiv = $('<canvas/>', { class: "dualbox Canvas3D", style: "width: 100%; height: 100%;" });
+        cdiv.mousedown( canvas.onMouseDown.bind(canvas) );
+        cdiv.mouseup( canvas.onMouseUp.bind(canvas) );
+        cdiv.mousemove( canvas.onMouseMove.bind(canvas) );
+        cdiv.contextmenu( canvas.onContextMenu.bind(canvas) );
+        cdiv.on("mousewheel", canvas.onWheel.bind(canvas) );
+        cdiv.dblclick(canvas.onDblClick.bind(canvas))
+
+        // bind touch events too
+        cdiv.on('touchstart', canvas.onTouchStart.bind(canvas));
+        cdiv.on('touchend', canvas.onTouchEnd.bind(canvas));
+        cdiv.on('touchmove', canvas.onTouchMove.bind(canvas));
+
+        // build a webgl error div
+        var errMsg = appDesc.webGLErrorMessage || "Sorry ! It seems that your browser doesn't support webGL which is " +
+            " necessary to display 3D content. Click <a href='http://get.webgl.org' target='_blank'>here</a> to find out why.";
+        var errDiv = $('<div/>', { class: "dualbox webgl-error", style: "position: absolute; bottom: 0px; width: 100%; " +
+            "background-color: #db4620;" });
+        errDiv.append( $('<p/>', { class: "dualbox", style: "color: white; text-align: center; margin: 5px 0 5px 0;" }).append(errMsg) );
+        canvas._errDiv = errDiv;
+
+
+
+        // instanciate div from app.json parameters
+        canvas.div = $('<div/>', { class : "dualbox-canvas3d-container", id:canvas.id + "-container"}).append(
+            cdiv
+        );
+
+        // resize the upper dualbox-component container to 100% of given div, then append div, then append to param div
+        $(div).parent().css('width','100%').css('height','100%').css('position', 'relative');
+        $(div).css('width','100%').css('height','100%').css('position', 'relative');
+        $(div).append(canvas.div);
+
+        canvas.container = div;
+
+        // watch for resize of our container, apply it to the canvas
+        var erd = elementResizeDetectorMaker();
+        var lastResize = null;
+        erd.listenTo(div, function(element) {
+            // avoid resize loop
+            var now = new Date();
+            if( Math.abs(now - lastResize) < 50 ) {
+                // 50 ms - probably a resize loop, don't resize
+                return;
+            }
+            lastResize = now;
+            canvas.resize()
+        });
+
+        // return the canvas
+        return canvas;
+    }
+};
+
+
+module.exports = Canvas3D;
+

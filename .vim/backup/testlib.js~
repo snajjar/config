@@ -1,0 +1,95 @@
+const fs = require('fs-extra');
+const colors = require('colors');
+var testPassed = false;
+
+// require Dualbox default types
+require("@dualbox/dualbox-type-number");
+require("@dualbox/dualbox-type-boolean");
+require("@dualbox/dualbox-type-string");
+require("@dualbox/dualbox-type-array");
+require("@dualbox/dualbox-type-object");
+require("@dualbox/dualbox-type-buffer");
+require("@dualbox/dualbox-type-map");
+require("@dualbox/dualbox-type-json");
+require("@dualbox/dualbox-type-regexp");
+require("@dualbox/dualbox-type-nativearray");
+
+var app = null;
+
+// we can setApp() in a test to output app state when a test fails
+var setApp = function(application) {
+    app = application;
+}
+
+// to be called if the test should pass (would fail otherwise)
+var pass = function() {
+    testPassed = true;
+    console.log("Test success !");
+    process.exit(0);
+}
+
+var dumpSnapshot = function(app) {
+    var filename = process.mainModule.filename;
+    console.log(filename);
+    var snapshotFileName = filename.substr(0, filename.lastIndexOf("test.js")) + "snapshot.json";
+    var json = app.getSnapshot();
+    var text = JSON.stringify(json);
+    fs.writeFileSync(snapshotFileName, text);
+    console.log('--> snapshot dumped at ' + snapshotFileName);
+}
+
+// call to reject the test
+var reject = function(err) {
+    console.log("Test failed: " + err.toString());
+    if( app ) app.analyzeState();
+    if( app ) dumpSnapshot(app);
+    process.exit(-1);
+}
+
+// helper to compare arrays
+var compareArrays = function(arr1,arr2){
+    if(arr1.length !== arr2.length){
+        return false;
+    }else{
+        var ok = true;
+        for(var i=0; i<arr1.length; ++i){
+            ok && arr1[i] === arr2[i];
+        }
+        return ok;
+    }
+}
+
+// creates a function to be called nbChecks times to pass the test
+var createChecker = function( nbChecks ) {
+    var n = nbChecks; // should be called 6 times
+    return function() {
+        if(--n == 0) pass();
+    }
+};
+
+process.on('uncaughtException', (err) => {
+    console.log(err.message.red);
+    console.error(err.stack);
+});
+
+process.on('exit', function(code) {
+    if( code==0 && testPassed ) {
+        console.log("Goodbye !");
+    }
+    else {
+        if( code==0 ) {
+            reject("process exited before test was validated");
+        }
+        else {
+            reject("process exited with error");
+        }
+    }
+});
+
+module.exports = {
+    pass : pass,
+    reject : reject,
+    compareArrays : compareArrays,
+    createChecker : createChecker,
+    setApp : setApp,
+}

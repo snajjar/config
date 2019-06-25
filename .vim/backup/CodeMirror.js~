@@ -1,0 +1,8 @@
+var CodeMirror = require('codemirror/lib/codemirror.js');
+require('codemirror/lib/codemirror.css');
+require('codemirror/mode/xml/xml.js');
+require('codemirror/mode/css/css.js');
+require('codemirror/mode/javascript/javascript.js');
+require('codemirror/mode/htmlmixed/htmlmixed.js');
+
+module.exports = CodeMirror;

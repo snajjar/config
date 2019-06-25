@@ -1,0 +1,146 @@
+var cp = require('child_process');
+var _ = require('lodash');
+var colors = require('colors');
+var dpmJson = require('@dualbox/dualbox-dpm/package.json');
+var shelljs = require('shelljs');
+var path = require('path');
+
+// shortcut
+var registry = dpmJson.registry;
+
+// return the full path of the folder
+function absolutePath(p) {
+    if( path.isAbsolute(p) ) {
+        return p;
+    }
+    return path.join(process.cwd(), p );
+}
+
+function relativePath(p) {
+    if( path.isAbsolute(p) ) {
+        return path.relative(process.cwd(), p);
+    }
+    return p;
+}
+
+class YarnClient {
+    constructor( p ) {
+        this.path = p ? p : process.cwd();
+        this.absPath = absolutePath(this.path);
+        this.pkgInfo = null;
+    }
+
+    execSync(cmd, options = { silent: true }) {
+        // save cwd path
+        var cwd = process.cwd();
+        shelljs.cd(this.path);
+
+        var ret = shelljs.exec(cmd, options);
+        if( ret && ret.stdout.length && ret.stdout[ret.stdout.length-1] == '\n' ) {
+            ret.stdout = ret.stdout.substr(0, ret.stdout.length - 1);
+        }
+        if( ret && ret.stderr.length && ret.stdout[ret.stderr.length-1] == '\n' ) {
+            ret.stderr = ret.stderr.substr(0, ret.stderr.length - 1);
+        }
+
+        // restore cwd path
+        shelljs.cd( cwd );
+
+        return ret;
+    }
+
+    installAll() {
+        this.execSync('yarn -s --registry ' + registry + " --ignore-engines");
+    }
+
+    // version is optional
+    install( name, version ) {
+        var versionStr = version ? "@" + version : "";
+        this.execSync('yarn add ' + name + versionStr + ' -s --registry ' + registry + " --ignore-engines");
+    }
+
+    addInWorkspace( packageName, name, version ) {
+        this.execSync('yarn workspace ' + packageName + " add " + name + ' -s --registry ' + registry + " --ignore-engines");
+    }
+
+    removeInWorkspace( packageName, name ) {
+        this.execSync('yarn workspace ' + packageName + " remove " + name + ' -s --registry ' + registry + " --ignore-engines");
+    }
+
+    link( name ) {
+        this.execSync('yarn link ' + name + ' -s --registry ' +  registry + " --ignore-engines");
+    }
+
+    unlink( name ) {
+        this.execSync('yarn unlink ' + name + ' -s --registry ' +  registry + " --ignore-engines");
+    }
+
+    // p: (optional) link folder
+    publishLink( p ) {
+        if( p ) {
+            this.execSync('yarn link -s --link-folder ' + p + ' --registry ' + registry);
+        }
+        else {
+            this.execSync('yarn link -s --registry ' + registry);
+        }
+    }
+
+    // p: (optional) link folder
+    unpublishLink( p ) {
+        if( p ) {
+            this.execSync('yarn unlink -s --link-folder ' + p + ' --registry ' + registry);
+        }
+        else {
+            this.execSync('yarn unlink -s --registry ' + registry);
+        }
+    }
+
+    build() {
+        return this.execSync("yarn run build");
+    }
+
+    buildNode() {
+        return this.execSync("yarn run build-node");
+    }
+
+    buildBrowser() {
+        return this.execSync("yarn run build-browser") && this.execSync("yarn run build-debug-browser") ;
+    }
+
+    run(cmd) {
+        return this.execSync("yarn -s run " + cmd);
+    }
+
+    whoami() {
+        try {
+            return this.execSync("npm whoami --registry " + dpmJson.registry, { silent : true }).stdout;
+        }
+        catch(e) {
+            return null;
+        }
+    }
+
+    info() {
+        if( !this.pkgInfo ) {
+            var jsonStr = this.execSync('yarn info -s --json --registry ' +  dpmJson.registry, { 'silent': true }).stdout;
+            this.pkgInfo = JSON.parse(jsonStr).data;
+        }
+        return this.pkgInfo;
+    }
+
+    versionInfo( name, version ) {
+        var jsonStr = this.execSync('yarn info ' + name + '@' + version + ' -s --json --registry ' +  dpmJson.registry, { 'silent': true }).stdout;
+        return JSON.parse(jsonStr).data;
+    }
+
+    infoPkg(name) {
+        var jsonStr = this.execSync('yarn info ' + name + ' -s --json --registry ' +  dpmJson.registry, { 'silent': true }).stdout;
+        return JSON.parse(jsonStr).data;
+    }
+
+    getPrefix() {
+        return this.execSync('yarn config get prefix').stdout;
+    }
+}
+
+module.exports = YarnClient;

@@ -1,0 +1,64 @@
+// now DualBox is requirable
+var DualBox = require('@dualbox/dualbox');
+const _ = require('lodash');
+
+process.on('message', message => {
+    var appJson = message.appJson;
+    var strictVersioning = message.strictVersioning;
+
+    // instanciate the app
+    var app = DualBox.start({
+        "logLevel" : "error",
+        "profiler" : false,
+        "ui" : {},
+        "json" : appJson,
+        "options" : { noVersionCheck : !strictVersioning },
+    });
+
+    // set all parameters
+    for( var key in message.parameters ) {
+        if( message.parameters.hasOwnProperty(key) ) {
+            var val = message.parameters[key];
+            if( val == null ) {
+                console.log('Setting input ' + key + ': ' + val);
+                app.setInput(key, val);
+            }
+            else if( val == undefined ) {
+                console.log('Setting input ' + key + ': ' + val);
+                app.setInput(key, val);
+            }
+            else {
+                var inputType = appJson.input[key] && appJson.input[key].type.toLowerCase();
+                if( !inputType ) {
+                    console.warn("[*] Won't set input for " + key + ": Input not defined in the target application");
+                }
+                else {
+                    switch( inputType ) {
+                    case "number":
+                        console.log('Setting input ' + key + ': ' + parseFloat(val));
+                        app.setInput(key, parseFloat(val));
+                        break;
+                    case "boolean":
+                        console.log('Setting input ' + key + ': ' + (val===true));
+                        app.setInput(key, val===true);
+                        break;
+                    case "string":
+                    default:
+                        console.log('Setting input ' + key + ': ' + val);
+                        app.setInput(key, val);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // prepare the callback on output
+    console.warn('[*] computing output...'.green);
+    app.readOutput(message.output, function(res) {
+        process.send(res);
+        //process.exit(0);
+    });
+});
+
+

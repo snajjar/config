@@ -1,0 +1,162 @@
+import { EventEmitter } from 'events';
+
+const LoggerObject = require('../LoggerObject');
+const uuid = require('../utils/uuid');
+const errors = require('../Errors');
+const _ = require('lodash');
+
+/*
+ *   DualBox class with a built-in event management intelligence
+ */
+class IOEmitter extends LoggerObject {
+    constructor(tag, options) {
+        super(tag, options);
+
+        this.ee = new EventEmitter();
+
+        // Keep track of all listeners to delete them properly when needed
+        // Object will be handled like this:
+        // listeners: {
+        //     eventName: [{  // array of objects
+        //         f,    // listener function
+        //         nid,  // origin node ID
+        //         name, // optional, name of the listener. If set, must be unique.
+        //         uuid, // uniq identifier
+        //     }]
+        // }
+        this.listeners = {};
+
+        // temporary set max listeners to 100 before the app.link() set it back to the right value
+        this.setMaxListeners(100);
+    }
+
+    // emit an event. Similar to EventEmitter.emit
+    emit(...args) {
+        return this.ee.emit(...args);
+    }
+
+    // set a max listener limit. Useful to detect listener leaks
+    setMaxListeners( n ) {
+        return this.ee.setMaxListeners(n);
+    }
+
+    /**************************************************************************
+     * UNTRACKED listeners functions. DO NOT USE THESES (unless for APIs)
+     *************************************************************************/
+
+    // listen on an event from this node. Similar to EventEmitter.on
+    _on(eventName, callback){
+        return this.ee.on(eventName, callback);
+    }
+
+    // listen once on an event from this node. Similar to EventEmitter.once
+    _once(eventName, callback){
+        return this.ee.once(eventName, callback);
+    }
+
+    // remove a listener. Similar to EventEmitter.removeListener
+    _removeListener(...args) {
+        return this.ee.removeListener(...args);
+    }
+
+    // remove all the listeners on this node+event (event UNTRACKED ones). Similar to EventEmitter.removeAllListeners
+    _removeAllListeners(eventName){
+        return this.ee.removeAllListeners(eventName);
+    }
+
+
+    /**************************************************************************
+     * TRACKED listener functions. USE THESES FOR INTERNAL SHAPEX STUFF
+     *************************************************************************/
+    countAllListeners() {
+        var eventNames = Object.keys(this.listeners);
+        var count = 0;
+
+        for(let i=0; i<eventNames.length; i++) {
+            let eventName = eventNames[i];
+            if( this.listeners[eventName] ) {
+                count += this.listeners[eventName].length;
+            }
+        }
+
+        return count;
+    }
+
+    countListeners(node, eventName) {
+        return _.filter(this.listeners[eventName], { 'nid' : node.id }).length;
+    }
+
+    // set up a tracked "on" listener
+    // return the unique ID of the listener
+    on(node, eventName, callback) {
+        if( !this.listeners[eventName] ) this.listeners[eventName] = [];
+
+        var id = uuid.v4();
+        this.listeners[eventName].push({
+            f: callback,
+            nid: node.id,
+            uuid: id,
+            type: "on",
+        });
+
+        this.debug("[LISTEN] %s listen on %s:%s", node.id, this.id, eventName, { userOrigin: false });
+        this._on(eventName, callback);
+        return id;
+    }
+
+    // set up a tracked "once" listener
+    // return the unique ID of the listener
+    once(node, eventName, callback) {
+        if( !this.listeners[eventName] ) this.listeners[eventName] = [];
+
+        var id = uuid.v4();
+
+        // creates a closure cb that will remove the listener when called
+        var createCB = () => {
+            var self = this, eventName = eventName, id = id;
+            return function() {
+                self.removeListenerById(eventName, id);
+                callback.apply(self, arguments);
+            }
+        };
+        var cb = createCB();
+
+        this.listeners[eventName].push({
+            f: cb,
+            nid: node.id,
+            uuid: id,
+            type: "once",
+        });
+
+        this.debug("[LISTEN] %s listen once on %s:%s", node.id, this.id, eventName, { userOrigin: false });
+        this._once(eventName, cb);
+        return id;
+    }
+
+    // remove all Listeners from a node
+    removeListener(node, eventName) {
+        var listeners = _.filter(this.listeners[eventName], { 'nid' : node.id });
+
+        // remove the listener
+        if( listeners.length ) {
+            for(var i=0; i<listeners.length; i++) {
+                this.removeListenerById(eventName, listeners[i].uuid); // remove track
+            }
+        }
+    }
+
+    removeListenerById(eventName, id) {
+        var listeners = _.filter(this.listeners[eventName], { 'uuid' : id });
+        if( listeners.length > 0 ) {
+            if( listeners.length != 1 ) {
+                throw new errors.ImplementationError("Found more than 1 listener for uuid " + id);
+            }
+
+            var listener = listeners[0];
+            this.ee.removeListener(eventName, listener.f);
+            _.remove(this.listeners[eventName], function(l) { return l.uuid == id });
+        }
+    }
+}
+
+module.exports = IOEmitter;

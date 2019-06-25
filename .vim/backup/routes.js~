@@ -1,0 +1,344 @@
+import Future from 'fibers/future';
+
+// augment default limit to be able to receive compiled apps
+Router.onBeforeAction(Iron.Router.bodyParser.json({limit: "200mb"}));
+/*
+Router.onBeforeAction(Iron.Router.bodyParser.urlencoded({
+        extended: true,
+        limit: '200mb'
+    }), {where: 'server'});
+*/
+
+Router.route('BuildNotify', {
+    path: '/api/build/notify',
+    where: 'server',
+    action: function() {
+        var buildId      = this.request.headers["buildid"];
+        var appName      = this.request.headers["appname"];
+        var appVersion   = this.request.headers["appversion"];
+        var status       = this.request.headers["status"];
+        console.log('[BUILD] notification: BUILDID=' + buildId +
+                ", APPNAME=" + appName + ", APPVERSION=" + appVersion +
+                ", STATUS=" + status);
+
+        var version = AppVersions.findOne({ 'buildId' : buildId });
+        if( version !== undefined ) {
+            var buildClient  = new BuildClient(version._id);
+
+            var data = null;
+            if( this.request.body.data ) {
+                var buf = Buffer.from(this.request.body.data);
+                var data = buf.toString('utf8');
+            }
+            buildClient.updateStatus( status, data );
+        }
+    }
+}, { 'where' : 'server' });
+
+Router.route('APIFile', {
+    path: '/api/file/:_userId/:_path(.*)?',
+    where: 'server',
+    action: function() {
+        var userId = this.params._userId;
+        if( !userId ) {
+            throw new Meteor.Error(404, 'this user does not exist');
+        }
+
+        // resolve the amazon file url
+        var awsClient = new AWSClient( userId );
+        var realUrl = awsClient.resolve( this.params._path );
+
+        // respond with redirection
+        this.response.writeHead(302, {
+            'Location': realUrl,
+            'Cache-control' : 'no-cache' // no cache for API Files, apps handle it
+        });
+
+        this.response.end();
+    },
+});
+
+
+
+Router.route('AppPhaseScript', {
+    path: '/api/app/:_appName/p/:_appPhase',
+    where: 'server',
+    action: function() {
+        this.phase    = phase();
+        var appName  = this.params._appName;
+        var appPhase = this.params._appPhase;
+
+        console.log("Fetching script for app %s phase %s", appName, appPhase);
+
+        var app = Apps.findOne({ name: appName });
+        if( app !== undefined ) {
+            var versionId = app.phases && app.phases[appPhase];
+            console.log("Phases: " + JSON.stringify(app.phases));
+            if( versionId ) {
+                var version  = AppVersions.findOne(versionId);
+                if( version.deployStatus == "deployed" ) {
+                    var url = version.cdnScriptUrl ? version.cdnScriptUrl : version.scriptUrl;
+                    console.log("Fetching %s", url);
+
+                    // set some headers in the response
+                    this.response.setHeader('Access-Control-Allow-Origin', '*');
+                    this.response.setHeader('X-APP', version.appName);
+                    this.response.setHeader('X-VERSION', version.appVersion);
+                    this.response.setHeader('X-PHASE', appPhase);
+                    this.response.setHeader('Pragma', 'no-cache');
+                    this.response.setHeader('Cache-Control', 'no-cache, must-revalidate');
+
+                    this.response.write(
+                        JSON.stringify({
+                            'Location' : url,
+                            'App'      : version.appName,
+                            'Version'  : version.appVersion,
+                            'Phase'    : appPhase
+                        })
+                    );
+                    this.response.end();
+
+                    notifyInstanciation(this.request, versionId);
+                    return;
+                }
+                else {
+                    console.error("Found version %s for app %s on phase %s, but this version isn't deployed", version.appVersion, appName, appPhase);
+                }
+            }
+            else {
+                console.warn("Can't find deployed version for app %s on phase %s", appName, appPhase);
+            }
+        }
+        else {
+            console.warn("Can't find app %s", appName);
+        }
+
+        this.response.writeHead(404);
+        this.response.end();
+    }
+}, { 'where' : 'server' });
+
+Router.route('AppVersionScript', {
+    path: '/api/app/:_appName/v/:_appVersion',
+    where: 'server',
+    action: function() {
+        this.phase    = phase();
+        var appName    = this.params._appName;
+        var appVersion = this.params._appVersion;
+
+        console.log("Fetching script for app %s version %s", appName, appVersion);
+        var version = AppVersions.findOne({ appName : appName, appVersion: appVersion });
+        if( version !== undefined ) {
+            if( version.deployStatus == "deployed" ) {
+                var url = version.cdnScriptUrl ? version.cdnScriptUrl : version.scriptUrl;
+                console.log("Fetching %s", url);
+
+                // set some headers in the response
+                this.response.setHeader('Access-Control-Allow-Origin', '*');
+                this.response.setHeader('X-APP', version.appName);
+                this.response.setHeader('X-VERSION', version.appVersion);
+                this.response.setHeader('Pragma', 'no-cache');
+                this.response.setHeader('Cache-Control', 'no-cache, must-revalidate');
+
+                this.response.write(
+                    JSON.stringify({
+                        'Location' : url,
+                        'App'      : version.appName,
+                        'Version'  : version.appVersion,
+                    })
+                );
+                this.response.end();
+
+                // update instanciations
+                notifyInstanciation(this.request, version._id);
+
+                return;
+            }
+            else {
+                console.error("Found version %s for app %s, but this version isn't deployed", version.appVersion, appName);
+            }
+        }
+        else {
+            console.warn("Can't find the version %s for app %s", appVersion, appName);
+        }
+
+        this.response.writeHead(404);
+        this.response.end();
+    }
+}, { 'where' : 'server' });
+
+Router.route('AppVersionJson', {
+    path: '/api/app/:_appName/v/:_appVersion/json',
+    where: 'server',
+    action: function() {
+        this.phase    = phase();
+        var appName    = this.params._appName;
+        var appVersion = this.params._appVersion;
+
+        var version = AppVersions.findOne({ appName : appName, appVersion: appVersion });
+        if( version !== undefined ) {
+            this.response.write(version.json);
+            this.response.end();
+            return;
+        }
+        else {
+            console.warn("Can't find the version %s for app %s", appVersion, appName);
+        }
+
+        this.response.writeHead(404);
+        this.response.end();
+    }
+}, { 'where' : 'server' });
+
+Router.route('UploadVersionScript', {
+    path: '/api/component/upload',
+    where: 'server',
+    action: function() {
+        // get from request the component name, version, script and debug flag
+        // sent by dpm
+        var componentName = "";
+        var componentVersion = "";
+        var script = "";
+        var debug = false;
+
+        // get the script from the body
+        var data = null;
+
+        if( this.request.body ) {
+            var json = this.request.body;
+
+            var componentName = json.componentName;
+            var componentVersion = json.componentVersion;
+            var script = json.script;
+            var debug = json.debug;
+            var description = json.description;
+            var pkg = JSON.parse(json.pkg);
+            var ownerEmail = pkg && pkg.dualbox && pkg.dualbox.owner;
+
+            /* Not all libs have this defined... :(
+            if( !(pkg && pkg.dualbox) ) {
+                var errMsg = 'Error uploading package ' + componentName + ', not a dualbox package (no "dualbox" field).';
+                console.error(errMsg);
+                this.response.write(
+                    JSON.stringify({
+                        'Uploaded' : false,
+                        'Inserted': false,
+                        'Error' : errMsg,
+                    })
+                );
+                this.response.end();
+                return;
+            }
+            */
+
+            if( ownerEmail ) {
+                var owner = Meteor.users.findOne({ "emails.address" : ownerEmail });
+                if( owner ) {
+                    var ownerId = owner._id;
+                }
+                else {
+                    var errMsg = 'Error uploading package ' + componentName + ', owner "' + ownerEmail + '" has not been found. Upload has been aborted.';
+                    console.error(errMsg);
+                    this.response.write(
+                        JSON.stringify({
+                            'Uploaded' : false,
+                            'Inserted': false,
+                            'Error' : errMsg,
+                        })
+                    );
+                    this.response.end();
+                    return;
+                }
+            }
+
+            /*
+            console.log('component name: ' + componentName);
+            console.log('component version: ' + componentVersion);
+            console.log('debug: ' + debug + " (type: " + (typeof debug) + ")");
+            console.log('script: ' + script.substring(0, 150));
+            console.log('description: ' + description.substring(0, 150));
+            */
+
+            try {
+                var awsClient = new AWSClient();
+                var fut = new Future();
+                awsClient.uploadComponentScript(componentName, componentVersion, script, debug, function(err, r) {
+                    if( err ) {
+                        fut.throw(err);
+                    }
+                    else {
+                        fut.return(r);
+                    }
+                });
+                var result = fut.wait();
+
+                var scriptLocation = awsClient.getCdnLocation(result.Location);
+
+                // If we're here, the script was uploaded successfully
+                // We now need to update our collection to register it (and make it available from search)
+                var ret = PackagesVersions.upsert({ packageName: componentName, versionNumber: componentVersion }, { $set: {
+                    description: description,
+                    scriptUrl: debug ? undefined : scriptLocation,
+                    debugScriptUrl: debug ? scriptLocation : undefined,
+                    pkg: pkg,
+                    ownerId: ownerId
+                }});
+                if( ret.numberAffected == 1 ) {
+                    // Now that we have the packageVersion file, update the package file
+                    var set = {
+                        "lastVersion.packageName": componentName,
+                        "lastVersion.versionNumber" : componentVersion,
+                        "lastVersion.description": description,
+                        "lastVersion.scriptUrl": debug ? undefined : scriptLocation,
+                        "lastVersion.debugScriptUrl": debug ? scriptLocation : undefined,
+                        "lastVersion.pkg": pkg,
+                        "lastVersion.ownerId" : ownerId
+                    };
+                    console.log('inserting set: ' + JSON.stringify(set, null, 2));
+                    var ret = Packages.upsert({ name: componentName }, { $set: set});
+
+                    if( ret.numberAffected == 1 ) {
+                        this.response.write(
+                            JSON.stringify({
+                                'Uploaded' : true,
+                                'Inserted' : true,
+                                'Location' : result.Location,
+                                'CdnLocation' : awsClient.getCdnLocation(result.Location)
+                            })
+                        );
+                        this.response.end();
+                        return;
+                    }
+                    else {
+                        console.error('Packages was not inserted: ' + require('util').inspect(ret));
+                    }
+                }
+                else {
+                    console.error('PackagesVersions was not inserted: ' + require('util').inspect(ret));
+                }
+
+                // Error scenario: package was uploaded but not inserted correctly
+                this.response.write(
+                    JSON.stringify({
+                        'Uploaded' : true,
+                        'Inserted': false,
+                        'Error' : 'Package was not inserted correctly in database',
+                        'Location' : result.Location,
+                        'CdnLocation' : awsClient.getCdnLocation(result.Location)
+                    })
+                );
+                this.response.end();
+            }
+            catch(e) {
+                this.response.write(
+                    JSON.stringify({
+                        'Uploaded' : false,
+                        "Error" : e.message,
+                    })
+                );
+                this.response.end();
+            }
+
+        }
+    },
+});

@@ -1,0 +1,281 @@
+/*
+
+var browserify = require('browserify');
+var babelify = require('babelify');
+var browserifycss = require('browserify-css');
+var rollupify = require('rollupify');
+var bundleMinify = require('bundle-minify');
+
+*/
+var rollup = require('rollup');
+var commonjs = require('rollup-plugin-commonjs');    // require
+var noderesolve = require('rollup-plugin-node-resolve'); // require from node_modules
+var multientry = require('rollup-plugin-multi-entry'); // require for bundling multiple libs into one
+var terser = require('rollup-plugin-terser').terser; // minify
+var json = require('rollup-plugin-json'); // parse json file
+var builtins = require('rollup-plugin-node-builtins'); // node builtins
+var postcss = require('rollup-plugin-postcss'); // node builtins
+var babel = require('rollup-plugin-babel');
+
+var fs = require('fs-extra');
+var path = require('path');
+var _ = require('lodash');
+var colors = require('colors');
+
+var cmd;
+var browserifyBuild = function(args, app, deps, buildDir, cb) {
+    // debug
+    cmd = 'browserify _dualbox_init.js -o bundle.js -r ./app.json:app.json -g rollupify -g browserify-css -t [ babelify --presets ["@babel/preset-env"]] --plugin [ bundle-minify ]';
+
+    // path for browserify to look for modules (will also look on global npm folder, as we did set NODE_PATH)
+    var sourcePaths = process.env['NODE_PATH'].split(':') || [];
+    sourcePaths.push(path.join(buildDir, "node_modules"));
+    var debug = args['debug'] !== undefined;
+
+    // create browserify with options
+    var opts = {
+        'fullPaths' : !debug,
+        'debug' : debug,
+        'paths' : sourcePaths, // search for modules in spm cache path
+        'baseDir' : buildDir
+    }
+    var b = browserify(null, opts);
+
+    // add app.json
+    var jsonPath = path.join(buildDir, 'app.json');
+    fs.copySync(args['_'][0], jsonPath);
+    b.require(jsonPath, { expose: 'app.json' });
+
+    // add other scripts (or dualbox init.js)
+    if( args["_"].length > 1 ) {
+        for(var i=1; i<args["_"].length; i++) {
+            // user provided scripts, copy into build directory
+            var fname = args["_"][i];
+            fs.copySync(fname, buildDir);
+            //console.log('adding file ' + path.join(buildDir,fname));
+            b.add(path.join(buildDir,fname));
+        }
+    }
+    else {
+        var initFilePath = path.join(__dirname, '_dualbox_init.js');
+        //console.log('adding file ' + initFilePath)
+        b.add(initFilePath);
+    }
+
+    // add all dependencies
+    _.each(deps, function(depList, listName) {
+        _.each(depList, (version, component) => {
+            if( component.indexOf('dualbox-core') !== 0 ) {
+                b.require(component, { paths : sourcePaths });
+                cmd += " -r " + component;
+            }
+        });
+    });
+
+    b.transform(rollupify);
+
+    // apply babelify - UNECESSARY: should be done at build time
+    b.transform(babelify, { presets: ['env'], compact: false })
+
+    // apply browserify-css transform
+    b.transform(browserifycss, { autoInject: true, global: true })
+
+    // if not built in debug mode, apply uglifyjs transform
+    if( !debug || args['minify']==false ) {
+        // pre-transform for compression
+        b.plugin(bundleMinify);
+    }
+
+    // build bundle
+    try {
+        var bundle = b.bundle(function(err, buf) {
+            if( err ) {
+                cb(err, null);
+                return;
+            }
+            else {
+                cb(null, buf.toString());
+            }
+            process.send(buf.toString());
+        }).on('error', function(err) {
+            cb(err, null);
+        });
+    }
+    catch(e) {
+        cb(e, null);
+    }
+}
+
+// try to compile app.json which each dualbox package, one by one, to see which will fail
+var debugBuild = function(args, app, deps, buildDir) {
+    var buildDeps = {};
+    var dualboxDeps = {};
+    _.each(deps, (version, name) => {
+        if( name.indexOf('@dualbox') == -1 ) {
+            buildDeps[name] = version;
+        }
+        else {
+            dualboxDeps[name] = version;
+        }
+    });
+
+    _.each(dualboxDeps, (version, name) => {
+        var runDeps = _.assign({}, buildDeps)
+        runDeps[name] = version; // add this dualbox dependency
+
+        console.log('[*] DEBUG: trying to compile with only ' + name);
+        browserifyBuild(args, app, deps, buildDir, (err, result) => {
+            if( err ) {
+                console.log(('[*] DEBUG: trying to compile with only ' + name + ': failed').red);
+                console.log(err.red);
+            }
+            else {
+                console.log(('[*] DEBUG: trying to compile with only ' + name + ': success').green);
+                console.log(err.green);
+            }
+        });
+    });
+}
+
+var rollupBundle = async function(inputOptions, outputOptions) {
+    try {
+        // create a bundle
+        const bundle = await rollup.rollup(inputOptions);
+
+        /*
+        console.log(bundle.imports); // an array of external dependencies
+        console.log(bundle.exports); // an array of names exported by the entry point
+        console.log(bundle.modules); // an array of module objects
+        */
+
+        // generate code and a sourcemap
+        const { output } = await bundle.generate(outputOptions);
+
+        // or write the bundle to disk
+        await bundle.write(outputOptions);
+    }
+    catch(e) {
+        console.error(('[*] ' + e).red);
+    }
+}
+
+
+var rollupBuild = async function(args, app, deps, cwd, cb) {
+    return new Promise( async (resolve, reject) => {
+        var fileName = args['_'][0];
+        var outputFile = path.join(cwd, args['o']);
+        var requireFileName = "require.js";
+        var requireFileContent = "";
+
+        var clean = function() {
+            try { fs.removeSync(fileName); } catch(e) {}
+            try { fs.removeSync(requireFileName); } catch(e) {}
+        }
+
+        // build globals object from deps
+        var globals = {};
+
+        _.each(deps, function(depList, listName) {
+            _.each(depList, (version, component) => {
+                if( component.startsWith('@dualbox') ) {
+                    globals[component] = require.resolve(component);
+                    requireFileContent += 'require("' + component + '");\n';
+                }
+            });
+        });
+        //globals["app.json"] = app;
+
+        fs.writeFileSync(requireFileName, "function neverCalled() { " + requireFileContent + "}", "utf-8");
+
+        if( args.debug ) {
+            try {
+                await rollupBundle({
+                    input: ['_dualbox_init.js', 'require.js'],
+                    plugins:  [
+                        multientry(),
+                        commonjs(),
+                        noderesolve({
+                            browser: true,
+                            preferBuiltins: true
+                        }),
+                        json(),
+                        builtins(),
+                        postcss({
+                            extensions: ['.css'],
+                        })
+                    ],
+                    // remove circular dependency warnings
+                    onwarn: function(warning, warn) {
+                        if(warning.code === 'CIRCULAR_DEPENDENCY') return;
+                        warn(warning);
+                    }
+                }, {
+                    format: 'iife',
+                    name: 'DualBox',
+                    file: outputFile,
+                    strict: false,
+                    sourcemap: true
+                });
+
+                clean();
+                resolve();
+            }
+            catch(e) {
+                clean();
+                reject(e);
+            }
+        }
+        else {
+            try {
+                await rollupBundle({
+                    input: ['_dualbox_init.js', 'require.js'],
+                    plugins:  [
+                        multientry(),
+                        commonjs(),
+                        noderesolve({
+                            browser: true,
+                            preferBuiltins: true
+                        }),
+                        json(),
+                        builtins(),
+                        postcss({
+                            extensions: ['.css'],
+                        }),
+                        terser()
+                    ],
+                    // remove circular dependency warnings
+                    onwarn: function(warning, warn) {
+                        if(warning.code === 'CIRCULAR_DEPENDENCY') return;
+                        warn(warning);
+                    },
+                    treeshake : false
+                }, {
+                    format: 'iife',
+                    name: 'DualBox',
+                    strict: false,
+                    file: outputFile,
+                    sourcemap: false
+                });
+
+                clean();
+                resolve();
+            }
+            catch(e) {
+                clean();
+                reject(e);
+            }
+        }
+    });
+}
+
+process.on('message', async message => {
+    try {
+        await rollupBuild(message.args, message.app, message.deps, message.cwd );
+        process.send("");
+    }
+    catch(e) {
+        throw e;
+    }
+});
+
+

@@ -1,0 +1,539 @@
+@{ var utils = require('../Utils') }
+
+@!(data)
+<div class="edit-node-panel h100" id="edit-node-panel">
+    <div style="padding-left: 10px; padding-top: 10px; padding-right: 10px;">
+        <h2 class="edit-dualbox-node-id">
+            <div class="dualbox-node-name">
+                <span class="text-truncate d-inline-block" style="width: 290px">@(data.node.graphId)</span>
+                <button class="btn btn-light btn-sm btn-edit-dualbox-node-name"><i class="fa fa-edit"></i></button>
+            </div>
+            <div class="dualbox-node-name-edit" style="display: none;">
+                <input type="text" class="form-control dualbox-node-name-input" style="display: inline-block;" value="@(data.node.graphId)" data-type="@(data.node.type)" autofocus/>
+                <button class="btn btn-primary btn-save-node-name-change" data-id="@(data.node.graphId)" data-type="@(data.node.type)" style="display: inline-block;">Save</button>
+            </div>
+        </h2>
+        <p><small class="edit-dualbox-node-package-name">@(data.node.getPackageName())</small></p>
+    </div>
+
+    <div class="edit-body">
+        <div class="card">
+            <div class="card-header" id="dualbox-node-desc" data-toggle="collapse" data-target="#dualbox-node-desc-collapse" aria-expanded="true" aria-controls="dualbox-node-desc-collapse">
+                <h5 class="mb-0 btn-link">Description</h5>
+            </div>
+
+            <div id="dualbox-node-desc-collapse" class="collapse show" aria-labelledby="dualbox-node-desc" data-parent="#edit-node-panel">
+                <div class="card-body" style="padding-left: 15px;">
+                    <div class="module-left-signature"></div>
+                    <p class="module-left-description">
+                        @if( data.node.isInput() ) {
+                            @(data.node.getDescription() || "Input [No description available]")
+                        }
+                        else if( data.node.isOutput() ) {
+                            @(data.node.getDescription() || "Output [No description available]")
+                        }
+                        else if( data.node.isMetanode() ) {
+                            @if( data.node.getDescription() ) {
+                                @(data.node.getDescription())
+                                (<a href="#" class="edit-module-description" data-id="@(data.node.id)">edit description</a>)
+                            }
+                            else {
+                                <a href="#" class="edit-module-description" data-id="@(data.node.id)" data-desc="@(data.node.getDescription())">Add a description</a>
+                            }
+                        }
+                        else {
+                            @(data.node.getPackage().description || "[No description available]")
+                        }
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-settings">
+            <div class="card-header" id="dualbox-node-comments" data-toggle="collapse" data-target="#dualbox-node-comments-collapse" aria-expanded="false" aria-controls="dualbox-node-comments-collapse">
+                <h5 class="mb-0 btn-link">Comments</h5>
+            </div>
+            <div id="dualbox-node-comments-collapse" class="collapse" aria-labelledby="dualbox-node-comments" data-parent="#edit-node-panel">
+                <div class="card-body">
+                    <div style="padding-left: 15px; padding-right: 15px;">
+                        @if( data.node.hasComment() ) {
+                            <p class="node-comment-text">@(data.node.getComment())</p>
+                        }
+                        else {
+                            <a href="#" class="add-node-comment">Add a comment</a>
+                        }
+
+                        <div class="node-comment-edit" style="display: none;">
+                            <textarea class="node-comment" rows=4 style="width: 100%;" data-id="@(data.node.id)">@if( data.node.hasComment() ){@(data.node.getComment())}</textarea>
+                            <div style="text-align: right; margin-top: 10px;">
+                                <button class="btn btn-sm btn-secundary btn-delete-comment" data-id="@(data.node.id)">Delete</button>
+                                <button class="btn btn-sm btn-primary btn-save-comment" data-id="@(data.node.id)">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    <!-- Compute options -->
+    @if( data.node.isModule() ) {
+        <div class="card card-settings">
+            <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-compute-collapse" aria-expanded="false" aria-controls="dualbox-node-compute-collapse">
+                <h5 class="mb-0 btn-link">Compute options</h5>
+            </div>
+            <div id="dualbox-node-compute-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                <div class="card-body">
+                    <div class="form-group" style="padding-left: 20px;">
+                        <div>
+                            <label>
+                                <input class="input-cache-toggle" type="checkbox" data-id="@(data.node.id)" @if(data.node.hasCacheActivated()){checked}>
+                                <span>Cache result <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="top" title="Keep the result in memory (the cache) to avoid computing this box every-time its result is required. The cache will be invalidated if an input prior to this box is changed." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button></span>
+                            </label>
+                        </div>
+                        @if( !data.node.isMetanode() ) {
+                            <div>
+                                <label>
+                                    <input class="input-worker-toggle" type="checkbox" data-id="@(data.node.id)" @if(data.node.isParallel()){checked}>
+                                    <span>Execute in a worker <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="top" title="Workers are separate contexts of executions that can execute long-running tasks without blocking the browser execution. Use this for heavy computations." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button><br/><span class="text-danger worker-warning" @if(!data.node.isParallel()){style="display: none;"}>Due to some technical limitations, this will only affect the built bundle. Please run tests on the built bundle as well.</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Widget options -->
+        @if( data.node.isWidget() ) {
+            <div class="card card-default">
+                <div class="card-header" id="dualbox-node-widget" data-toggle="collapse" data-target="#dualbox-node-widget-collapse" aria-expanded="false" aria-controls="dualbox-node-widget-collapse">
+                    <h5 class="mb-0 btn-link">Widget Options</h5>
+                </div>
+                <div id="dualbox-node-widget-collapse" class="collapse" aria-labelledby="dualbox-node-widget" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <span>Widget registered to: </span>
+                        <select class="form-control form-control-sm select-widget-registerTo" data-id="@(data.node.id)" style="max-width: 250px;">
+                            <option value="">none</option>
+                            @{var targets = data.node.m.getSpecialUINodes( data.node.getRegisterType() ) }
+                            @for(var j=0; j<targets.length; j++) {
+                            <option value="@(targets[j].graphId)" @if( data.node.getWidgetRegistration() == targets[j].graphId ) {selected }>@(targets[j].id)</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Inputs -->
+        @if( data.node.isInput() ) {
+            <div class="card card-default">
+                <div class="card-header" id="dualbox-node-default" data-toggle="collapse" data-target="#dualbox-node-default-collapse" aria-expanded="false" aria-controls="dualbox-node-default-collapse">
+                    <h5 class="mb-0 btn-link">Default value</h5>
+                </div>
+                <div id="dualbox-node-default-collapse" class="collapse" aria-labelledby="dualbox-node-default" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <span>Default value: </span><span>@displayValue(data.node.getDefaultValue(), "default")</span>
+                    </div>
+                </div>
+            </div>
+        }
+        else {
+            @if( data.node.hasInputs() ) {
+                <div class="card card-settings">
+                    <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-inputs-collapse" aria-expanded="false" aria-controls="dualbox-node-inputs-collapse">
+                        <h5 class="mb-0 btn-link">Inputs <small><span class="badge badge-secondary">@(data.node.getInputsNames().length)</span></small></h5>
+                    </div>
+                    <div id="dualbox-node-inputs-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                        <div class="card-body">
+                            <table class="table-desc table-striped">
+                                <thead class="thead-dark">
+                                    <th>Input</th>
+                                    <th>Visible</th>
+                                    <th>Type</th>
+                                    <th>Default</th>
+                                </thead>
+                                <tbody>
+                                    @{var keys = data.node.getInputsNames() }
+                                    @for(var i=0; i<keys.length; i++) {
+                                        @{ var key = keys[i] }
+                                        <tr>
+                                            <td>
+                                                @(key)
+                                                @if( data.node.hasInputDesc(key) ) {
+                                                    <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="@(data.node.getInputDesc(key))" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                                }
+                                            </td>
+                                            <td>
+                                                <input class="input-visibility-toggle" type="checkbox" data-id="@(data.node.id)" data-input="@(key)" @if(data.node.isInputVisible(key)){checked}>
+                                            </td>
+                                            <td><span class="badge badge-secondary">@( utils.htmlentities(data.node.getInputType(key)) )</span></td>
+
+                                            <td>@displayValue(data.node.getInputDefaultValue(key), "input", key)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+
+
+        <!-- Outputs -->
+        @if( data.node.hasOutputs() ) {
+            <div class="card card-settings">
+                <div class="card-header" id="dualbox-node-outputs" data-toggle="collapse" data-target="#dualbox-node-outputs-collapse" aria-expanded="false" aria-controls="dualbox-node-outputs-collapse">
+                    <h5 class="mb-0 btn-link">Outputs <small><span class="badge badge-secondary">@(data.node.getOutputsNames().length)</span></small></h5>
+                </div>
+                <div id="dualbox-node-outputs-collapse" class="collapse" aria-labelledby="dualbox-node-outputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Output</th>
+                                <th>Type</th>
+                                <th>Visible</th>
+                            </thead>
+                            <tbody>
+                                @{var keys = data.node.getOutputsNames() }
+                                @for(var i=0; i<keys.length; i++) {
+                                    @{ var key = keys[i] }
+                                    <tr>
+                                        <td>
+                                            @(key)
+                                            @if( data.node.hasOutputDesc(key) ) {
+                                                <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="@(data.node.getOutputDesc(key))" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                            }
+                                        </td>
+                                        <td><span class="badge badge-secondary">@( utils.htmlentities(data.node.getOutputType(key)) )</span></td>
+                                        <td>
+                                            <input class="output-visibility-toggle" type="checkbox" data-id="@(data.node.id)" data-output="@(key)" @if(data.node.isOutputVisible(key)){checked}>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Attributes -->
+        @if( data.node.hasAttributes() ) {
+            <div class="card card-settings">
+                <div class="card-header" id="dualbox-node-attrs" data-toggle="collapse" data-target="#dualbox-node-attrs-collapse" aria-expanded="false" aria-controls="dualbox-node-attrs-collapse">
+                    <h5 class="mb-0 btn-link">Attributes <small><span class="badge badge-secondary">@(data.node.getAttributesNames().length)</span></small></h5>
+                </div>
+                <div id="dualbox-node-attrs-collapse" class="collapse" aria-labelledby="dualbox-node-attrs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Output</th>
+                                <th>Type</th>
+                                <th>Value</th>
+                            </thead>
+                            <tbody>
+                                @{var keys = data.node.getAttributesNames() }
+                                @for(var i=0; i<keys.length; i++) {
+                                    @{ var key = keys[i] }
+                                    <tr>
+                                        <td>
+                                            @(key)
+                                            @if( data.node.hasAttributeDesc(key) ) {
+                                                <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="@(data.node.getAttributeDesc(key))" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                            }
+                                        </td>
+                                        <td><span class="badge badge-secondary">@( utils.htmlentities(data.node.getAttributeType(key)) )</span></td>
+                                        <td>@displayValue(data.node.getAttributeValue(key), "attr", key)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+
+        <!-- Loops -->
+        @if( data.node.hasInputs() ) {
+            <div class="card card-settings">
+                <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-loops-collapse" aria-expanded="false" aria-controls="dualbox-node-loops-collapse">
+                    <h5 class="mb-0 btn-link">Loops <small><span class="badge badge-secondary">@if(data.node.hasLoop()){on}else{off}</span></small></h5>
+                </div>
+                <div id="dualbox-node-loops-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <h4>Iterators
+                            <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="Iterators will break an array in input into a list of their components. The module will be computed several times, each time with one different component from every iterator input. Inputs that don't define iterators will use their current value as-is for the different computations." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                        </h4>
+                        <table class="table-desc table-striped">
+                            <tbody>
+                                @{var keys = data.node.getInputsNames() }
+                                @for(var i=0; i<keys.length; i++) {
+                                    @{ var key = keys[i]; }
+                                    <tr>
+                                        <td>@(key)</td>
+                                        <td>
+                                            <input class="input-iterator-toggle" type="checkbox" data-id="@(data.node.id)" data-input="@(key)" @if(data.node.hasIterator(key)){checked} />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+
+                        <h4 class="mt-2">Feedback
+                            <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="Feedback (during a loop) is a reinjection of an output result of one iteration into an input of the next iteration." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                        </h4>
+                        <table class="table-desc table-striped">
+                            <tbody>
+                                @{var keys = data.node.getOutputsNames(); }
+                                @for(var i=0; i<keys.length; i++) {
+                                    @{ var key = keys[i]; }
+                                    <tr>
+                                        <td>@(key)</td>
+                                        <td>
+                                            <select class="form-control form-control-sm select-output-feedback" data-id="@(data.node.id)" data-output="@(key)">
+                                                <option value="none">No feedback</option>
+                                                @{var k = data.node.getInputsNames() }
+                                                @for(var j=0; j<k.length; j++) {
+                                                <option value="@(k[j])" @if(data.node.getFeedback(key)==k[j]){selected}>@(k[j])</option>
+                                                }
+                                            </select>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if( data.node.isUI() ) {
+            <div class="card card-settings">
+                <div class="card-header" id="dualbox-node-events" data-toggle="collapse" data-target="#dualbox-node-events-collapse" aria-expanded="false" aria-controls="dualbox-node-events-collapse">
+                    <h5 class="mb-0 btn-link">Events <small><span class="badge badge-secondary">@(data.node.getOutboundEvents().length)</span></h5>
+                </div>
+                <div id="dualbox-node-events-collapse" class="collapse" aria-labelledby="dualbox-node-events" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped" style="font-size: 12px!important;">
+                            @if( data.node.hasOutEvents() ) {
+                            <thead class="thead-dark">
+                                <th>Target</th>
+                                <th>Event</th>
+                                <th>If</th>
+                                <th>Data</th>
+                                <th>Action</th>
+                            </thead>
+                            <tbody>
+                                @{var events = data.node.getOutboundEvents(); }
+                                @for(var i=0; i<events.length; i++) {
+                                    @{ var evt = events[i]; }
+                                    <tr data-index="@(i)">
+                                        <td>
+                                            @if(evt.node) {
+                                                <select class="form-control form-control-sm select-event-target" data-id="@(data.node.id)" data-index="@(i)" >
+                                                    @{ var nodes = data.node.m.getNodes("ui"); }
+                                                    @for(var j=0; j<nodes.length; j++) {
+                                                        @{ var node = nodes[j]; }
+                                                        @if( node.getEventsNames().length !== 0 ) {
+                                                            <option value="@(node.getGraphId())" @if(node.getGraphId()===evt.node){selected}>@(node.getGraphId())</option>
+                                                        }
+                                                    }
+                                                </select>
+                                            }
+                                            else {
+                                                <span>@(evt.selector)</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <select class="form-control form-control-sm select-event-name" data-id="@(data.node.id)" data-index="@(i)" >
+                                            @if(evt.node) {
+                                                <!-- options will be dynamically changed when target change -->
+                                                @{ var targetNode = data.node.m.getNode(evt.node); }
+                                                @{ var targetEvents = targetNode.getEventsNames(); }
+                                                @for(var j=0; j<targetEvents.length; j++) {
+                                                    @{ var targetEvent = targetEvents[j]; }
+                                                    <option value="@(targetEvent)" @if(evt.event===targetEvent){selected}>@(targetEvent)</option>
+                                                }
+                                            }
+                                            else {
+                                                <option value="hide">hide</option>
+                                                <option value="show">show</option>
+                                            }
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <input class="form-control form-control-sm event-if" type="text" data-id="@(data.node.id)" data-index="@(i)" value="@(evt.if)" />
+                                        </td>
+                                        <td>
+                                            <input class="form-control form-control-sm event-data" type="text" data-id="@(data.node.id)" data-index="@(i)" value="@(evt.data)" />
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-danger btn-editor-xs btn-remove-event" data-id="@(data.node.id)" data-index="@(i)" >
+                                                <i class="fa fa-minus"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                                <tr>
+                                    <td colspan="5" style="padding-top: 0px; padding-bottom: 0px;">
+                                        <button class="btn btn-sm btn-add-event" data-id="@(data.node.id)" style="width: 100%;">Add event</button>
+                                    </td>
+                                <tr>
+                            </tbody>
+                        </table>
+
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="modal edit-value-modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit value</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="set-type">
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value unset-value" id="unset-value" name="set-value" value="unset-value" checked>
+                            <label class="form-check-label" for="unset-value">
+                                don't set a value
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value set-value-null" id="set-value-null" name="set-value" value="set-value-null">
+                            <label class="form-check-label" for="set-value-null">
+                                set null
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value set-value-type" id="set-value-type" name="set-value" value="set-value-type" aria-label="Set a value of type">
+                            <div class="form-inline form-check-label" style="height: 24px;">
+                                <label for="set-value-type">
+                                    set a value of type:
+                                    <select class="form-control choose-value-type d-inline-block form-control-sm ml-2">
+                                        <option value="string">String</option>
+                                        <option value="number">Number</option>
+                                        <option value="boolean">Boolean</option>
+                                        <option value="object">Object</option>
+                                        <option value="file">File</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="separator"/>
+                    <div class="has-value" style="display: none;">
+                        <div class="define-value define-boolean" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <select class="form-control form-control-sm bool-value d-inline-block ml-2">
+                                    <option value=true>True</option>
+                                    <option value=false>False</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="define-value define-file" style="display: none;">
+                            <div class="form-inline">
+                                <label>File input</label>
+                                <input type="file" class="form-control-file form-control-sm file-value">
+                            </div>
+                        </div>
+                        <div class="define-value define-number" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <input type="number" class="form-control form-control-sm number-value ml-2"/>
+                            </div>
+                        </div>
+                        <div class="define-value define-string" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <input type="text" class="form-control form-control-sm text-value ml-2"/>
+                            </div>
+                        </div>
+                        <div class="define-value define-object" style="display: none;">
+                            <label>Value: </label>
+                            <div class="json-editor" style="height: 400px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary btn-save">Save changes</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Display an editable value -->
+<!-- type: "input" or "attr", name: name of the input/attr -->
+<!-- valueType: type of v -->
+@function displayValue(v, type, name) {
+    @if( type == "input" ) {
+        @{ var dataType = data.node.getInputType(key).toLowerCase(); }
+    }
+    else if( type == "attr" ) {
+        @{ var dataType = data.node.getAttributeType(key).toLowerCase(); }
+    }
+    else {
+        <!-- type: default -->
+        @{ dataType = "object"; }
+    }
+    @if( dataType !== "string" && dataType !== "number" && dataType !== "boolean" ) {
+        @{ dataType = "object"; }
+    }
+
+    @{ var className = type + "-" + data.node.graphId + "-" + name; }
+
+    @if( v === undefined ) {
+        <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-undefined=true data-valueType="@(dataType)">
+            <i class="fas fa-edit"></i>
+        </a>
+        <span class="@className"></span>
+    }
+    else if( v === null ) {
+        <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-null=true data-valueType="@(dataType)">
+            <i class="fas fa-edit"></i>
+        </a>
+        <span class="@className">null</span>
+    }
+    else {
+        @if( typeof v === "object" ) {
+            <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-value="@(utils.htmlentities(JSON.stringify(v)))" data-valueType="object">
+                <i class="fas fa-edit"></i>
+            </a>
+            <span class="@className">[Object]</span>
+        }
+        else {
+            @{ var valType = typeof v }
+            @if( valType === "string" ) {
+                <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-value="@(utils.htmlentities(v))" data-valueType="string">
+                    <i class="fas fa-edit"></i>
+                </a>
+                <span class="@className">"@(utils.htmlentities(v))"</span>
+            }
+            else if( valType === "number" ) {
+                <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-value="@(v)" data-valueType="number">
+                    <i class="fas fa-edit"></i>
+                </a>
+                <span class="@className">@(v)</span>
+            }
+            else if( valType === "boolean" ) {
+                <a href="#" class="setValue" data-id="@(data.node.id)" data-type="@(type)" data-name="@(name)" data-value="@(v)" data-valueType="boolean">
+                    <i class="fas fa-edit"></i>
+                </a>
+                <span class="@className">@(v)</span>
+            }
+        }
+    }
+}

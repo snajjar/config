@@ -1,0 +1,1648 @@
+"use strict";
+
+import { EventEmitter } from 'events';
+
+const env = require('./Env');
+const LoggerObject = require('./LoggerObject');
+const errors = require('./Errors');
+const MetaModule = require('./nodes/MetaModule');
+const Session = require('./Session');
+const Type = require('./Type');
+const IONode = require('./nodes/IONode');
+const _ = require('@dualbox/dualbox-lib-lodash');
+const displayUtils = require('./utils/display');
+const utils = require('./utils/misc');
+const htmltool = require('@dualbox/dualbox-lib-htmltool');
+const crypto = require('crypto');
+const AppParser = require('@dualbox/dualbox-lib-appparser');
+
+/**
+ *  DualBox App:
+ *  - init DualBox Modules, interface and link everything.
+ *  - Provides API
+ *  @constructor
+ */
+class App extends LoggerObject {
+    constructor( json, id = "", rootApp = null ) {
+        var logId = id ? "App("+id+")" : "App";
+        super(logId, { userOrigin: false, logLevel: env.getLogLevel() });
+
+        this.json = JSON.parse(JSON.stringify(json)); // clone object to ensure we'll not modify the argument object
+        this.originalJSON = _.clone(json);
+
+        this.desc = {};       // mapping id -> json app description
+        this.id = id;         // empty for the original app, but can be specified for metamodule apps
+
+        this.coreModules = {
+            "dualbox-core-if"        : require('./nodes/core/If'),
+            "dualbox-core-value"     : require('./nodes/core/Value'),
+            "dualbox-core-script"    : require('./nodes/core/Script'),
+            "dualbox-core-switch"    : require('./nodes/core/Switch'),
+            "dualbox-core-from-json" : require('./nodes/core/FromJson'),
+            "dualbox-core-to-json"   : require('./nodes/core/ToJson'),
+        }
+
+
+        // require all libs (if they import css, fonts and stuff)
+        if( this.isRootApp() ) {
+            _.each( this.json.libs, (version, lib) => {
+                require(lib);
+            });
+        }
+
+        // check that we can require() every component we need
+        this.checkRequirements();
+
+        // check which UI we should instanciate
+        this.uiAllowed  = false;
+        this.interfaces = {};
+        this.resolveInterfaces( json );
+
+        // create a uniq hash for this json application
+        this.hash = this.generateHash( json );
+        this.uid = Math.floor( Math.random() * 1000000000 ); // unique id
+
+        // Mappings id -> IONode
+        this.modules = {}; // mapping id -> Module
+        this.uiNodes = {}; // mapping id -> UIElement
+        this.nodes   = {}; // mapping id -> IONode (= this.modules + this.uiNodes);
+
+        // Application event node, to handle application-level events
+        this.ee = null;
+        this.events = this.json.events;
+
+        // CSS stylesheet
+        this.css = this.json.css && !_.isEmpty(this.json.css) ? this.json.css : null;
+
+        // Root app configuration
+        this.rootApp = this.id == "" ? this : rootApp;
+        this.displayDiv = null;  // Display div (Canvas3D, Canvas2D, other)
+        this.catchErrors = !env.getRemoveTryCatch(); // if we want to catch errors or not
+
+        this.nbParallelModules = 0;
+
+        // patch the json definition with the missing fields
+        // add input, outputs, and link them correctly
+        this.patchJson();
+
+        // for recording (debug option)
+        this.recordMap = new Map();
+
+        // instanciate all the application's nodes
+        this.buildModules();
+        if( env.browser && this.json["interface"] !== undefined ) {
+            if( this.uiAllowed ) {
+                this.buildInterface();
+            }
+        }
+
+        if( this.isRootApp() ) {
+            this.session = new Session();
+        }
+
+        // set input types from the app definition
+        _.each( this.json.input, (input, name) => {
+            this.debug("Forcing app %s input %s (module %s) type to %s",
+                this.id, name, this.getInputModuleName(name), input.type, { userOrigin: false });
+            this.nodes[ this.getInputModuleName(name) ].setInputType('value', input.type);
+        });
+
+        // set output types from app definition
+        _.each( this.json.output, (output, name) => {
+            this.debug("Forcing app %s output %s (module %s) type to %s",
+                this.id, name, this.getOutputModuleName(name), output.type, { userOrigin: false });
+            this.nodes[ this.getOutputModuleName(name) ].setOutputType('value', output.type);
+        });
+
+        // link nodes between them
+        this.link();
+
+        // initialize application's event node
+        this.initializeEvents();
+    }
+
+    // check if module, ui, lib is a dualbox component
+    isComponent( name ) {
+        return name.startsWith('@dualbox/dualbox') && !name.startsWith('@dualbox/dualbox-core');
+    }
+
+    checkRequirements() {
+        var error = false;
+        var notRequirable = [];
+
+        _.each(this.json.libs, (version, name) => {
+            if( this.isComponent(name) ) {
+                try {
+                    require(name);
+                }
+                catch(e) {
+                    error = true;
+                    notRequirable.push(name);
+                    this.error(name + " is a dependency but can't be required");
+                }
+            }
+        });
+
+        _.each(this.json.modules, (json, name) => {
+            if( this.isComponent(json.module) ) {
+                try {
+                    require(json.module);
+                }
+                catch(e) {
+                    error = true;
+                    notRequirable.push(json.module);
+                    this.error(json.module + " is a dependency but can't be required");
+                }
+            }
+        });
+
+        _.each(this.json.ui, (json, name) => {
+            if( this.isComponent(json.module) ) {
+                try {
+                    require(json.module);
+                }
+                catch(e) {
+                    error = true;
+                    notRequirable.push(json.module);
+                    this.error(json.module + " is a dependency but can't be required");
+                }
+            }
+        });
+
+        if( error ) {
+            throw new errors.CompileError('All dependencies are not requirable: missing ' + notRequirable.join(' '));
+        }
+    }
+
+    // determine which UI we should instanciate or not
+    resolveInterfaces( json ) {
+        var r = {};
+        var div = env.getDiv();
+
+        if( div === false ) {
+            // we instanciate nothing, only a pure app (from parameter)
+            _.each( json.interfaces, (value, key) => {
+                r[key] = false;
+            });
+        }
+        else {
+            var envUI = env.getUI();
+
+            // fill all interfaces not mentionned to true
+            _.each( json.interface, (value, key) => {
+                r[key] = envUI[key] !== undefined ? envUI[key] : true;
+            });
+
+            // allow UI in the app
+            if( this.isRootApp() && env.browser && !env.worker ) {
+                this.uiAllowed = true;
+            }
+        }
+
+        this.interfaces = r;
+    }
+
+    // generate a hash for a json (app.json)
+    generateHash( json ) {
+        var str = JSON.stringify(json);
+        var shasum = crypto.createHash('sha1');
+        shasum.update(str);
+        return shasum.digest('hex');
+    }
+
+    // Hide error messages
+    hideError() {
+        $('.dualbox-error-' + this.uid).remove();
+    }
+
+    // Show error in the app's display div if there is one
+    showError(errorClass, msg) {
+        if( this.uiAllowed && window ) {
+            var self = this;
+            var $ = window.DualBox.$;
+            var rootApp = this.getRootApp();
+            var position = $(rootApp.displayDiv).offset();
+            var width = $(rootApp.displayDiv).width(), height = $(rootApp.displayDiv).height();
+
+            $('document').ready(function() {
+                $('body').append(
+                    $('<div/>', {
+                        class: 'dualbox-error-container dualbox-error-' + self.uid,
+                        style: displayUtils.buildStyle({
+                            'position': 'absolute',
+                            'top': position.top + "px",
+                            'bottom': '0',
+                            'left': position.left + "px",
+                            'right': '0',
+                            'width': width + "px",
+                            'height': height + "px",
+                            'background-color': 'rgba(255,255,255,0.9)',
+                            'color': '#666',
+                            'vertical-align': 'middle',
+                        })
+                    }).append(
+                        $('<div/>', {
+                            class: 'dualbox-error-center-div',
+                            style: displayUtils.buildStyle({
+                                'width' : '100%',
+                                'height': '100px',
+                                'margin': 'auto',
+                                'padding': '50px',
+                                'position': 'absolute',
+                                'top': '0px',
+                                'bottom': '0px',
+                                'left': '0px',
+                                'right': '0px',
+                                'margin': 'auto',
+                                'text-align': 'center'
+                            })
+                        }).append(
+                            $('<h3/>', { style: 'margin-bottom: 20px; font-size:18px;' }).append('A ' + errorClass + ' happened'),
+                            $('<p/>', { class: 'dualbox-load-label' }).append(msg)
+                        )
+                    )
+                );
+            });
+
+            // if there's an error event defined in application
+            // (hide loader or some divs)
+            if( this.events['error'] && this.isInitialized() ) {
+                this.trigger('error');
+            }
+        }
+        else {
+            console.error(msg);
+        }
+    }
+
+    // run the param function into a try/catch, and handle the error properly
+    trycatch( tryFunction, catchFunction ) {
+        if( this.isRootApp() ) {
+            if( this.catchErrors ) {
+                try {
+                    tryFunction();
+                }
+                catch( e ) {
+                    if( catchFunction ) catchFunction(e);
+
+                    if( env.browser ) {
+                        var errorClass = e.name ? e.name : "UnexpectedError";
+                        var e_message = e.message !== undefined ? e.message : e;
+                        var msg = "<div style='text-align: left'><p style='margin-top: 30px; margin-bottom: 30px; color: red'>" + utils.toHtmlEntities(e_message) + "</p>Please refresh the page and report the error if it still occurs.</div>";
+                        this.showError(errorClass, msg);
+                    }
+
+                    if( !catchFunction ) {
+                        throw e; // node.js, rethrow
+                    }
+                }
+            }
+            else {
+                tryFunction();
+            }
+        }
+        else {
+            // if subapp, redirect to root app's trycatch
+            this.getRootApp().trycatch(tryFunction, catchFunction);
+        }
+    }
+
+    // return the input box value from the metamodule's input parameter name
+    getInputModuleName( name ) {
+        return this.isRootApp() ? "input-" + name : this.id + ">input-" + name;
+    }
+
+    // return the output box value name from the metamodule's output parameter name
+    getOutputModuleName( name ) {
+        return this.isRootApp() ? "output-" + name : this.id + ">output-" + name;
+    }
+
+    setLogLevel( logLevel ) {
+        super.setLogLevel( logLevel );
+        this.reduce(function(n) { n.setLogLevel(logLevel) });
+        this.reduceApps(function(a) { a.setLogLevel(logLevel) });
+    }
+
+    setProfiler( b ) {
+        this.reduce(function(n) { n.setLogLevel(logLevel) });
+    }
+
+    // get all modules nodes defined in the JSON
+    getModuleNodes() {
+        var r = [];
+        _.each( this.json.modules, function( module, id ) {
+            module.id = id;
+            r.push(module);
+        });
+        return r;
+    }
+
+    // recursively get the UIs from a json array or div
+    _getUIs(json) {
+        var jsonArray = Array.isArray(json) ? json : [json];
+
+        var nodes = [];
+        for(var i=0; i<jsonArray.length; i++) {
+            var element = jsonArray[i];
+
+            var nodeId = element.attributes
+                      && element.attributes.dataset
+                      && element.attributes.dataset.node;
+
+            if( nodeId ) {
+                var node = this.json.ui[nodeId];
+
+                // push the node if it matches
+                if( node ) {
+                    node.id = nodeId;
+                    nodes.push(node)
+                }
+            }
+
+            // if we have children on this node, recurses
+            if( element.children ) {
+                nodes = nodes.concat( this._getUIs(element.children) );
+            }
+        }
+
+        return nodes;
+    }
+
+
+    // return all interfaces in an array ('viewer', 'controls', etc.)
+    getInterfaces() {
+        return _.keys( this.json.interface );
+    }
+
+    // return in an array the interfaces that were instanciated ('viewer', 'controls', etc.)
+    getInstanciatedInterfaces() {
+        var notInstanciated = _.keys( _.pickBy( this.interfaces, (v,k) => !v ) );
+        return _.difference( this.getInterfaces(), notInstanciated );
+    }
+
+    // get all ui nodes defined in the JSON
+    getUINodes() {
+        var nodes = [];
+        _.each( this.getInterfaces(), ( name ) => {
+            if( this.json.interface && this.json.interface[name] ) {
+                nodes = nodes.concat( this._getUIs( this.json.interface[name] ) );
+            }
+        });
+        return nodes;
+    }
+
+    // get ui nodes defined in the JSON that will be instanciated
+    getInstanciatedUINodes() {
+        var nodes = [];
+        _.each( this.getInstanciatedInterfaces(), ( name ) => {
+            if( this.json.interface && this.json.interface[name] ) {
+                nodes = nodes.concat( this._getUIs( this.json.interface[name] ) );
+            }
+        });
+        return nodes;
+    }
+
+    // return all nodes (modules and uiNodes) instanciated in this app
+    getNodesDefinitions() {
+        // get module nodes
+        var nodes = this.getModuleNodes();
+        nodes = nodes.concat( this.getInstanciatedUINodes() );
+
+        return nodes;
+    }
+
+    // true if the node id correspond to a module node
+    isModuleNode(id) {
+        return _.find(this.getModuleNodes(), { "id" : id }) !== undefined;
+    }
+
+    // true if the node id correspond to an UI node
+    isUINode(id) {
+        return _.find(this.getUINodes(), { "id" : id }) !== undefined;
+    }
+
+    // true if the node id correspond to an UI node that will not be instanciated
+    isDroppedUINode(id) {
+        return this.isUINode(id) && _.find(this.getInstanciatedUINodes(), { "id" : id }) == undefined;
+    }
+
+    // Patch the app json definition to make it fully functionnal
+    patchJson() {
+        // patch Json to fill up possible missing fields
+        this.json.metanodes = this.json.metanodes || {};
+        this.json.input     = this.json.input || {};
+        this.json.output    = this.json.output || {};
+
+        // check for nodes with "input-" or "output-" ids
+        _.each( this.json.modules, ( node, id ) => {
+            if( id.indexOf("input-") !== -1 ){
+                throw new errors.CompileError("Node IDs cannot contain 'input-', this tag is reserved for metamodule's inputs.");
+            }
+            if( id.indexOf("output-") !== -1 ){
+                throw new errors.CompileError("Node IDs cannot contain 'output-', this tag is reserved for metamodule's outputs.");
+            }
+        });
+
+        // add input nodes
+        var inputKeys = Object.keys(this.json.input);
+        for(var i=0; i<inputKeys.length; i++) {
+            var key = inputKeys[i];
+            this.debug("Adding input module %s", "input-"+key, { userOrigin: false });
+
+            let id = "input-" + key;
+            let inputDesc = {
+                "module":"dualbox-core-value",
+                "version":"*",
+                "options":{},
+                "events" : this.json.input[key].events,
+            };
+
+            // add links if defined
+            if( this.json.input[key].link ) {
+                inputDesc["links"] = { "value" : this.json.input[ key ].link }
+            }
+
+            // add default value if defined
+            if( this.json.input[key]["value"] !== undefined) {
+                inputDesc["defaultInputs"] = { "value" : this.json.input[key]["value"] };
+            };
+
+            this.json.modules[id] = inputDesc;
+        }
+
+        // add output node with links
+        var outputKeys = Object.keys(this.json.output);
+        for(var i=0; i<outputKeys.length; i++) {
+            var key = outputKeys[i];
+
+            this.debug("Adding output module %s", "output-"+key, { userOrigin: false });
+
+            let id = "output-" + key;
+            this.json.modules[id] = {
+                "module":"dualbox-core-value",
+                "version":"*",
+                "id":"output-" + key,
+                "options":{},
+                "events" : this.json.output[key].events,
+                "links" : this.json.output[key].link ? { "value" : this.json.output[ key ].link } : {}
+            };
+        }
+
+        // patch node ids, and links to input and output
+        // if the node is linked to a UI node and we don't use UI, delete the link
+        var nodes = this.getNodesDefinitions();
+        for(var i=0; i<nodes.length; i++) {
+            var node = nodes[[i]];
+            node.links = node.links || {};
+            node.triggers = node.triggers || {};
+
+            if( !this.isRootApp() ) {
+                delete this.json.modules[node.id];
+                node.id = this.id + '>' + node.id;
+                this.json.modules[node.id] = node;
+            }
+
+            // patch node links
+            var lkeys = Object.keys(node.links);
+            for(var j=0; j<lkeys.length; j++) {
+                var key = lkeys[j];
+                var link = node.links[key];
+
+                // patch the node link
+                var linkModule = Object.keys(link)[0];
+                var linkOutput = link[ linkModule ];
+
+                if( this.isDroppedUINode(linkModule) ) {
+                    // this node is linked to a UI node. We don't use UI on this run
+                    this.debug("removing link to %s from node %s, not instanciating this UI node", linkModule, node.id);
+                    delete node.links[key];
+                }
+                else {
+                    // change input and names in the node links
+                    if( linkModule == "input" ) {
+                        node.links[key] = {};
+                        node.links[key][this.getInputModuleName(linkOutput)] = "value";
+                    }
+                    else if( linkModule == "output" ) {
+                        node.links[key] = {};
+                        node.links[key][this.getOutputModuleName(linkOutput)] = "value";
+                    }
+                    else {
+                        // if id patch needed, change name in links
+                        if( this.id ) {
+                            node.links[key] = {};
+                            node.links[key][this.id + '>' + linkModule] = linkOutput;
+                        }
+                    }
+                }
+            }
+
+            // patch node triggers (remove the UI element not instanciated)
+            // loop backward to remove safely from array
+            for(var j=node.triggers.length-1; j>=0; j--) {
+                var triggerNodeId = node.triggers[j];
+
+                if( this.isDroppedUINode(triggerNodeId) ) {
+                    this.debug("removing trigger %s from node %s, not instanciating this UI node", triggerNodeId, node.id);
+                    node.triggers.splice(j, 1); // remove the trigger
+                }
+            }
+        }
+
+        return this.json;
+    }
+
+
+    buildModules() {
+        // Build the node list
+        _.each( this.json.modules, (curr, id) => {
+            if( curr.module in this.json.metanodes ) {
+                this.debug("Load and instanciate meta-module " + curr.module);
+                var module = new MetaModule(curr.module, this.json.metanodes[curr.module], curr, this.getRootApp());
+            }
+            else if( _.has(this.coreModules, curr.module) ) {
+                var ModuleClass = this.coreModules[curr.module];
+                var module = new ModuleClass({ 'id': curr.id, 'rootApp': this.getRootApp(), 'appDesc': curr });
+
+                // if it's a root input, set it as such
+                if( this.isRootApp() && curr.id.indexOf('input-') == 0 ) {
+                    module.setRootInput(true);
+                }
+            }
+            else {
+                this.debug("Load and instanciate module " + curr.module);
+                try {
+                    var ModuleClass = require(curr.module);
+                }
+                catch(e) {
+                    throw new errors.CompileError("Module '" + curr.module + "' not found. Is it a defined DualBox Module ?");
+                }
+
+                var module = new ModuleClass({ 'id' : curr.id, 'rootApp': this.getRootApp(), 'appDesc': curr });
+            }
+
+            /*
+            if( !this.isRootApp() ) {
+                // root app will be set by metamodule after app init, that's ok
+                // don't authorize subapp nodes to restart themselves on interruption
+                // metamodule's node will restart anyway
+                module.allowRestart(false);
+            }
+            */
+
+            if(this.nodes[module.id] !== undefined){
+                throw new errors.CompileError("Module '" + module.id + "' is defined more than once. Please check node ids.");
+            }
+            this.nodes[module.id] = this.modules[module.id] = module;
+            this.debug("mapping " + module.id + " to " + JSON.stringify(curr));
+            this.desc[module.id] = curr;
+
+            // init module cache if needed
+            if( curr.cache !== undefined && curr.cache) {
+                this.log("[SETUP] setup cache on %s",module.id);
+                module.setOutputCache(curr.cache);
+            }
+
+            if( curr.parallel !== undefined ) {
+                this.log("[SETUP] setup parallel=%s on %s",curr.parallel,module.id );
+                module.setParallel( curr.parallel );
+            }
+
+            if( curr.loops !== undefined ) {
+                this.log("[SETUP] setup loops on %s");
+                for(var j=0; j<curr.loops.length;++j){
+                    module.addLoop(curr.loops[j]);
+                }
+            }
+
+            if( module.isParallel() ) {
+                this.nbParallelModules++;
+            }
+        });
+    }
+
+    // Some modules need other modules to run.
+    // They will need to register to those modules.
+    // ex : Widget3D need to register to Canvas3D.
+    // NOTE : MUST BE DONE AFTER LINK since appDesc is set on connect and used here.
+    registerModules(){
+        var that = this;
+        var keys = Object.keys(this.nodes);
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+            if(node.appDesc.registerTo !== undefined){
+                var targetNode = that.nodes[ node.appDesc.registerTo ];
+                node.registerTo(targetNode);
+            }
+            node.checkRegistering();
+        }
+    }
+
+    // build a html div interface from it's json definition
+    // Recurse on children if the node has some
+    buildInterfaceNode( json, container ) {
+        // parse this element only (json without children) and create the div
+        var jsonElement = JSON.parse(JSON.stringify(json));
+        delete jsonElement.children;
+        var html = htmltool.json2html( json );
+        var div = $.parseHTML(html)
+        $(div).empty();
+
+        if( json.attributes && json.attributes.dataset && json.attributes.dataset.node ) {
+            var nodeId = json.attributes.dataset.node;
+            var element = this.json.ui[nodeId];
+
+            if( element.type ) {
+                this.debug('instanciating a new ' + element.type);
+            }
+
+            var UIModule = require(element.module);
+            if( UIModule ) {
+                this.debug('rendering ui.' + element.type);
+
+                // create a subdiv that will contain our component
+                if( element.type == "Canvas3D" ) {
+                    this.displayDiv = div;
+                }
+                var attrs = { rootApp: this.getRootApp() };
+                var uiInstance = UIModule.attachTo(element, attrs, div);
+
+                // add to nodes
+                if(this.nodes[element.id] !== undefined){
+                    if(element.id.slice(0,6) === "input-"){
+                        throw new errors.CompileError("UI '" + element.id + "' has an input name starting with 'input-'. This prefixe is reserved for app inputs and it seems you do also have an input called "+element.id.replace("input-","")+", which will generate a input-file module internally and create a conflict. Please rename your UI to remove the input prefix.");
+                    }else{
+                        throw new errors.CompileError("Node '" + element.id + "' is defined more than once. Please check node ids.");
+                    }
+                }
+                this.nodes[element.id] = this.uiNodes[element.id] = uiInstance;
+                this.desc[element.id] = element;
+                // this.info("mapping %s to %s", element.id, JSON.stringify(element), { userOrigin: false });
+            }
+            else {
+                this.error(element.type + ' is not an existing DualBox interface element');
+            }
+        }
+
+        // recurse on children if needed
+        if( json.children ) {
+            _.each( json.children, (child) => {
+                this.buildInterfaceNode(child, div);
+            });
+        }
+
+        $(div).appendTo(container);
+    }
+
+    getDiv() {
+        // TO BE CHANGED. DualBox app should clone it's own environment
+        // to allow several DualBox env to works in 1 page without interferences
+        return env.getDiv();
+    }
+
+
+    buildInterface() {
+        var elements = {};
+
+        // if we're in a web page
+        if( this.uiAllowed ) {
+            this.log("Building interface");
+
+            // get the main UI div
+            let mainDiv = this.getDiv();
+
+            // create a container for the interface
+            let mainContainer = $('<div/>', {
+                class : "dualbox dualbox-container dualbox-main-container",
+                css : { "position": "relative", "background-color": "transparent", "height": "100%", "width": "100%" },
+            });
+
+            // for each part (interface, viewer) in which we want to add components
+            let keys = this.getInstanciatedInterfaces();
+            for(let i=0; i<keys.length; i++) {
+                let appInterface = this.json.interface[ keys[i] ];
+
+                // create the different UIs components for this interface
+                // and add them to the container
+                this.buildInterfaceNode(appInterface, mainContainer);
+            }
+
+            // insert the main div
+            $(document).ready(function() {
+                mainDiv.append(mainContainer);
+            });
+
+            // insert the stylesheet
+            this.insertStyleSheet();
+        }
+        else {
+            this.log("Not in a web page. No interface to build");
+        }
+    }
+
+    insertStyleSheet() {
+        if( env.browser && !env.worker ) {
+            // if we have css to insert
+            if( this.css ) {
+                var style = document.createElement('style')
+                style.id = "css-" + this.hash;
+                style.type = 'text/css';
+                style.innerHTML = this.css;
+                $('head').append(style);
+            }
+        }
+    }
+
+    removeStyleSheet() {
+        if( env.browser && !env.worker ) {
+            // if we have css to insert
+            if( this.css ) {
+                var styleSheet = $('#css-' + this.hash);
+                if( styleSheet ) {
+                    styleSheet.remove();
+                }
+            }
+        }
+    }
+
+    // initialize the eventNode, to allow this.trigger() and this.on() to work
+    initializeEvents() {
+        if( this.json.events ) {
+            this.ee = new EventEmitter();
+
+            // for each of our "IN" events, bind a listener from this node to our eventEmitter
+            _.each(this.events, (eventDef, eventName) => {
+                if( eventDef.in ) {
+                    _.each(eventDef.in, (e) => {
+                        if( e.node ) {
+                            var node = this.nodes[e.node];
+                            if( !node ) {
+                                this.warn('Can not bind application event ' + eventName +
+                                    ': node ' + e.node + ' does not exist in the application');
+                            }
+                            else {
+                                this.ee.on(e.event, node.getEventCb(e.event));
+                            }
+                        }
+                        else if( e.selector ) {
+                            // it's an event directed to one or several div
+                            this.emitHTMLEvent(e.event, e.data, e.selector);
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    emitHTMLEvent(name, data, selector) {
+        if( env.browser && !env.worker ) {
+            var $ = window.DualBox.$;
+            if( name == "hide" ) {
+                $(selector).hide();
+                $(selector).css('visibility', 'hidden');
+            }
+            else if( name == "show" ) {
+                $(selector).show();
+                $(selector).css('visibility', 'visible');
+            }
+        }
+    }
+
+    link() {
+        // first link the plug in like modules,
+        // (like widget3D and Canvas3D)
+        this.registerModules();
+
+        // Now iterate through nodes and init them (node links to itself)
+        var keys = Object.keys(this.nodes);
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+            node.initialize();
+        }
+
+        // start connections between nodes
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+            node.connect(this.desc[node.id], this.nodes);
+        }
+
+        // Security: fix the number of listeners for each node
+        // (except for output nodes of the main app, which may have extra data listeners (API calls))
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+
+            if( this.isRootApp() && node.id.indexOf("output-") !== -1 ) {
+                var maxListeners = node.countAllListeners();
+                this.debug("%s: setting max %d listeners", node.id, maxListeners);
+                node.setMaxListeners(maxListeners);
+            }
+            else {
+                node.setMaxListeners(0); // unlimited listeners
+            }
+        }
+
+        // Now that typechecking is working, load default input
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+            //try {
+                node.loadAppDefaultsInputs(this.desc[node.id]);
+            //}
+            //catch(e) {
+            //    e.message = e.message + "(Error occured in " + node.id + ")";
+            //    throw e;
+            //}
+        }
+    }
+
+    isInitialized(){
+        var res = true;
+        var keys = Object.keys(this.nodes);
+        for(var i=0; i<keys.length; ++i){
+            var node = this.nodes[keys[i]];
+            if(!node.isInitialized()){
+                res = false;
+                this.info("%s: isInitialized resturn FALSE.", node.id);
+                break;
+            }
+        }
+        return res;
+    }
+
+    /**
+     *  @return all nodes in the application (with nodes in metanodes too)
+     */
+    getAllNodes() {
+        var nodes = this.nodes;
+        var keys = Object.keys(this.nodes);
+
+        for(var i=0; i<keys.length; i++) {
+            var node = this.nodes[keys[i]];
+            if( node instanceof MetaModule ) {
+                // add the metamodule nodes in the array
+                var mNodes = node.getApp().getAllNodes();
+                var mKeys = Object.keys(mNodes);
+                for(var j=0; j<mKeys.length; j++) {
+                    var n = mNodes[ mKeys[j] ];
+                    nodes[ n.id ] = n;
+                }
+            }
+        }
+
+        return nodes;
+    }
+
+    /**
+     *  Convert the input to match the expected type (if possible)
+     *  ex: json -> DualBox.File
+     */
+    castInput(type, val) {
+        if( Type.check(type, val) ) {
+            // if type match right away, no problem
+            return val;
+        }
+        else {
+            // on Root app, we can have extended tests (for APIs sets)
+            if( this.isRootApp() ) {
+                // if it's a serialized object, cast it to its actual type
+                if( Type.isJson(val) ) {
+                    // We want the user to be able to setInput some json without having to know about
+                    // the internal JSONObject handling.
+                    // check which type match this json, if object, convert it to a JSONObject
+                    var t = Type.matchJSON(val);
+                    if( t.name == "object" ) {
+                        const JSONObject = require('@dualbox/dualbox-type-json');
+                        return new JSONObject(val);
+                    }
+                    else {
+                        var castedValue = Type.deserialize(val);
+                        if( Type.check(type, castedValue) ) {
+                            return castedValue;
+                        }
+                    }
+                }
+            }
+
+            // throw the right error
+            Type.checkThrow(type, val);
+            return val;
+        }
+    }
+
+    /**
+     *  @param {string} nid The node id of the node of which we want to set the input (input can't be linked !)
+     *  @param {string} key the input key to set
+     *  @param value the value to set
+     */
+    set(nid, key, value){
+        var node = this.nodes[nid];
+
+        if( node === undefined ) {
+            throw new errors.APIError("node " + nid + " is undefined");
+        };
+
+        // throw if type error
+        if( node.countLoops() === 0 ) {
+            // cast the input if needed
+            value = this.castInput( node.getInputType(key), value);
+        }
+        else {
+            // TODO: implement type check for loop nodes
+        }
+
+        // finally set the value
+        this.info("[APP SET] %s on %s : %s", value, node.id, key, { userOrigin: false });
+
+        // catch errors if needed
+        this.trycatch(()=> {
+            node.interrupt([key]);
+            node.setDefaultInput(key,value);
+            node.retrigger();
+        });
+    }
+
+    /**
+     *  @param {string} nid The node id we want to listen to
+     *  @param {function(data)} callback called when the data is returned. data.output contains the node output.
+     *
+     */
+    read(nid, key, callback){
+        var node = this.nodes[nid];
+        if( node === undefined ) {
+            throw new errors.APIError("Can not find node " + nid + " in app " + this.id);
+        }
+
+        /*
+        if( node.isStatus(IONode.status.COMPUTING) ) {
+            throw new errors.RuntimeError("Can not read on a computing node");
+        }
+        */
+
+        var cb = function(d) {
+            var result = null;
+            if(d && d.output && (d.output[key] !== undefined)){
+                result = d.output[key];
+            }
+            callback(result);
+        }
+
+        // if in a subapp, track the call
+        if( !this.isRootApp() ) {
+            // API call from metamodule.
+            // hacking but working because app has an id
+            this.log("Setting registered call");
+            node.once(this, 'data', cb);
+        }
+        else {
+            // regular API call, don't track the listener
+            this.log("Setting unregistered call");
+            node._once('data', cb)
+        }
+
+        this.info("[APP READ] on %s : %s",node.id,key, { userOrigin: false });
+
+        // catch errors if needed
+        node.fetchMissingDataAndCompute();
+    }
+
+    getInputParameters() {
+        return Object.keys(this.json.input);
+    }
+
+    getOutputParameters() {
+        return Object.keys(this.json.output);
+    }
+
+    removeOutputListener(key, fct) {
+        var nid = this.getOutputModuleName(key);
+        var node = this.nodes[nid];
+        node.removeListener('data', fct);
+    }
+
+    isRootApp() {
+        return this.id == "";
+    }
+
+    // exec function f on all subnodes (with this = node)
+    reduce( f ) {
+        var nodeIds = Object.keys(this.nodes);
+        for(var i=0; i<nodeIds.length; i++) {
+            var node = this.nodes[ nodeIds[i] ];
+            node.reduce(f);
+        }
+    }
+
+    // exec function f on this app and subapps (with this = node)
+    reduceApps( f ) {
+        var nodeIds = Object.keys(this.nodes);
+        for(var i=0; i<nodeIds.length; i++) {
+            var node = this.nodes[ nodeIds[i] ];
+            node.reduceApps(f);
+        }
+    }
+
+    setRootApp(app) {
+        this.rootApp = app;
+        this.reduce(function(n) { n.setRootApp(app); });
+    }
+
+    getRootApp() {
+        return this.rootApp;
+    }
+
+    interrupt(invalidKeys) {
+        this.log("[APP INTERRUPT] App %s on keys: %s", this.id, invalidKeys, { userOrigin: false });
+
+        // get input nodes and propagate interruption
+        var inputParams = this.getInputParameters();
+
+        for(var i=0; i<inputParams.length; i++) {
+            var key = inputParams[i];
+
+            for(var j=0; j<invalidKeys.length; j++) {
+                if( key == invalidKeys[j] ) {
+                    var nodeId = this.getInputModuleName(key);
+                    var node = this.nodes[nodeId];
+                    if( node === undefined ) {
+                        throw new errors.RuntimeError('Node ' + nodeId + ' is undefined in app ' + this.id);
+                    }
+
+                    node.interrupt(["value"]);
+                    node.removeDefaultInput("value");
+                    node.invalidInput("value");
+                }
+            }
+        }
+    }
+
+    /**************************************************************************
+     * API
+     *************************************************************************/
+    setInput(key, val) {
+        var nodeId = this.getInputModuleName(key);
+        if( nodeId === undefined ) {
+            throw new errors.APIError("input " + key + " is doesn't exist in app " + this.id);
+        }
+
+        var node = this.nodes[nodeId];
+        if( node === undefined ) {
+            throw new errors.APIError("input " + key + " has no node in app " + this.id);
+        }
+
+        // check if the node input is valid and is the same as val
+        // if not, set it
+        // TODO: need a comparison function for all types
+        if( node.inputValid[key] && node.inputValue[key] == val ) {
+            this.info("[APP SET] skipping set of %s on %s: %s, it's already set",val,node.id,key, { userOrigin: false });
+        }
+        else {
+            this.set(nodeId, "value", val);
+
+            // if the app has UIs, check if we need to retro-propagate the value to it
+            if( this.uiAllowed ) {
+                // get the input link
+                let input = node.links.input["value"];
+                if( input ) {
+                    if( input.node.desc.name.indexOf('@dualbox/dualbox-ui') === 0 ) {
+                        // this input is linked to an UI
+                        // if it supports import, import the new value to it
+                        var uiNode = input.node;
+                        if( uiNode.import ) {
+                            this.info("[APP SET] propagating value set on node %s", uiNode.id, { userOrigin: false });
+                            uiNode.import(val);
+                        }
+                    }
+                    else {
+                        this.warn('Input ' + key + ' appears not to be connected to an UI... Could not propagate input value to UI.');
+                    }
+                }
+            }
+        }
+    }
+
+    unsetInput(key) {
+        var nodeId = this.getInputModuleName(key);
+        if( nodeId === undefined ) {
+            throw new errors.APIError("input " + key + " is doesn't exist in app " + this.id);
+        }
+
+        var node = this.nodes[nodeId];
+        if( node === undefined ) {
+            throw new errors.APIError("input " + key + " has no node in app " + this.id);
+        }
+
+        node.removeDefaultInput(key);
+    }
+
+    readOutput(key, callback) {
+        var nodeId = this.getOutputModuleName(key);
+        if( nodeId === undefined ) {
+            throw new errors.APIError("output " + key + " is doesn't exist in app " + this.id);
+        }
+
+        if( this.isRootApp() ) {
+            const JSONObject = require('@dualbox/dualbox-type-json');
+            this.read(nodeId, "value", (result) => {
+                callback(result instanceof JSONObject ? result.get() : result);
+            });
+        }
+        else {
+            this.read(nodeId, "value", callback);
+        }
+    }
+
+
+    /**
+     * listen on an application event
+     */
+    on(name, cb) {
+        var eventDef = this.events[name];
+        if( !eventDef ) {
+            this.error('event ' + name + ' is not defined in this application');
+            return;
+            //throw new errors.ImplementationError('event ' + name + ' is not defined in this application');
+        }
+
+        var outEventDef = eventDef.out;
+        if( !outEventDef ) {
+            this.error('Can not listen to event ' + name + ': Event has no "OUT" definition');
+            return;
+            //throw new errors.ImplementationError('Can not listen to event ' + name + ': Event has no "OUT" definition');
+        }
+
+        var node = this.nodes[outEventDef.node];
+        if( !node ) {
+            this.error('Can not listen to event ' + name + ': node ' + outEventDef.node + ' does not exist');
+            return;
+            //throw new errors.ImplementationError('Can not listen to event ' + name + ': node ' + outEventDef.node + ' does not exist');
+        }
+
+        node._on(outEventDef.event, cb);
+    }
+
+    /**
+     * listen once an application event
+     */
+    once(name, cb) {
+        var eventDef = this.events[name];
+        if( !eventDef ) {
+            throw new errors.ImplementationError('event ' + name + ' is not defined in this application');
+        }
+
+        var outEventDef = eventDef.out;
+        if( !outEventDef ) {
+            throw new errors.ImplementationError('Can not listen to event ' + name + ': Event has no "OUT" definition');
+        }
+
+        var node = this.nodes[outEventDef.node];
+        if( !node ) {
+            throw new errors.ImplementationError('Can not listen to event ' + name + ': node ' + outEventDef.node + ' does not exist');
+        }
+        node._once(outEventDef.event, cb);
+    }
+
+    /**
+     * trigger an applicaytion event (with data). If callback defined, branch it to the right node
+     */
+    trigger(name, data, cb) {
+        if( !this.isInitialized() ) {
+            throw new errors.ImplementationError('You can\'t use DualBox.App.trigger() before the application is initialized(). ' +
+               "Please use DualBox.App.ready() to make sure the application is initialized");
+        }
+
+        var eventDef = this.events[name];
+        if( !eventDef ) {
+            throw new errors.ImplementationError('event ' + name + ' is not defined in this application');
+        }
+
+        if( cb ) {
+            this.once(name, cb);
+        }
+
+        _.each(eventDef.in, (e) => {
+            var d = e.data ? e.data : data; // if no data defined for this event, take the main event data
+            if( e.node ) {
+                // it's an event directed to a node
+                this.ee.emit(e.event, { command: name, args: d, dest: this.nodes[e.node] });
+            }
+            else if( e.selector ) {
+                // it's an event directed to one or several div
+                this.emitHTMLEvent(e.name, e.data, e.selector);
+            }
+        });
+    }
+
+    /**
+     *   Call cb when the app has been initialized
+     */
+    ready(cb) {
+       if( this.isInitialized() ) {
+           cb.apply(this);
+       }
+       else {
+           setTimeout( this.ready.bind(this, cb), 100);
+       }
+    }
+
+    /**
+     *   If start event is defined in the app, run it.
+     *   if cb is provided and the event has an "out" defined,
+     *   call it when the event is done
+     */
+    start(cb) {
+        var self = this;
+        this.ready(function() {
+            // iterate through inputs and launch triggers
+            if( self.events['start'] ) {
+                self.trigger('start', null, cb);
+            }
+        });
+    }
+
+    /**
+     *   Call stop() on all nodes
+     */
+    stop() {
+        // avoid _.each (Maximum call size)
+        var keys = Object.keys(this.nodes);
+        for(var i=0; i<keys.length; i++) {
+            this.nodes[keys[i]].stop();
+        }
+    }
+
+    /**
+     *  "Terminate" the application, by cleaning all instanciated UIs
+     */
+    kill() {
+        this.stop();
+
+        if( env.browser && !env.worker ) {
+            // hide errors if there was one
+            this.hideError();
+
+            // we must clean the main div
+            if( this.getDiv() ) {
+                this.getDiv().empty();
+            }
+
+            // remove the stylesheet
+            this.removeStyleSheet();
+        }
+    }
+
+    /**
+     *  Output in console useful informations about the app
+     */
+    interfaceHelper(){
+        var self = this;
+        if( env.node ) {
+            require('console-group').install();
+        }
+
+        console.group('Interface Helper');
+        console.group("Inputs descriptions");
+        _.each(this.json.input,function(input, key){
+            console.log(key+" (type " + input.type + ") : "+ (input.desc!==undefined? input.desc : "No description available."));
+        });
+        console.groupEnd();
+
+        console.group("Outputs descriptions");
+        _.each(this.json.output,function(output, key){
+            console.log(key+" (type " + output.type + ") : "+ (output.desc!==undefined? output.desc : "No description available."));
+        });
+        console.groupEnd();
+
+        console.group("UIs");
+        _.each(this.json.interface,function(group, key){
+            console.group(key);
+            _.each(self.json.interface[key], function(desc) {
+                let node = self.uiNodes[desc.id];
+                if( node ) {
+                    console.group(desc.id + " : " + (node.desc!==undefined? JSON.stringify(node.desc) : "[No description available]"));
+                }
+                else {
+                    console.group(desc.id + " : " + "[NOT INSTANTIATED]");
+                }
+
+                if( desc.attr ) {
+                    console.group("attrs");
+                    console.log(JSON.stringify(desc.attr, null, 2));
+                    console.groupEnd();
+                }
+
+                console.groupEnd();
+            });
+            console.groupEnd();
+        });
+        console.groupEnd();
+
+        if( env.node ) {
+            require('console-group').teardown();
+        }
+    }
+
+    // export all data from this applications (to be imported later or executed by a server)
+    export() {
+        if( !this.isRootApp() ) {
+            console.error('export() can only be run on the root application');
+            return;
+        }
+
+        var params = {
+            "input" : {},
+            "ui"    : {},
+            "interfaces" : this.interfaces
+        };
+
+        // populate with our app's instanceData if it exists
+        if( this.instanceData ) {
+            params["app"] = this.instanceData["app"];
+            params["version"] = this.instanceData["version"];
+            params["phase"] = this.instanceData["phase"];
+        }
+
+        // populate with our app inputs value so they can be executed (node.js run)
+        _.each(this.getInputParameters(), (param) => {
+            var nodeId = this.getInputModuleName(param);
+            params.input[param] = Type.serialize(this.nodes[nodeId].getLastValue());
+        });
+
+        // export session variables (globales)
+        params["session"] = this.session.export();
+
+        return params;
+    }
+
+    // import a json and load it into each instanciated UI
+    import(json) {
+        if( !json.ui ) {
+            throw new errors.RuntimeError('JSON must have the "ui" field defined with UIs values');
+        }
+
+        // import session variables
+        this.session.import( json.session );
+
+        // import input values for input that have no links
+        _.each( json.input, (value, key) =>  {
+            var nodeId = this.getInputModuleName(key);
+            var node = this.nodes[nodeId];
+
+            if( node !== undefined ) {
+                // check if this node is linked to an UI
+                // if not, set the saved value for this input
+                if( !node.hasLinkedInput("value") ) {
+                    this.setInput(key, value);
+                }
+                node.lastValue = value; // restore lastValue set for future export()
+            }
+            else {
+                this.warn('Could not restore value for input ' + key + ' : node not found !');
+            }
+        });
+
+        // try to resolve UIs values from the saved inputs
+        _.each( this.uiNodes, (n, id) => {
+            // if node has output, we'll try to resolve the node's value
+            // from the app inputs it's connected to
+            if( n.nbLinkedOutputs() === 1 ) {
+                // get the first output link
+                let key = Object.keys(n.links.output)[0];
+                let output = n.links.output[key];
+                let link = output[0]; // first link
+
+                if( link ) {
+                    if( link.node.id.indexOf('input-') === 0 ) {
+                        var inputName = link.node.id.substr("input-".length);
+                        var value = json.input[inputName];
+                        if( value !== undefined ) {
+                            n.import(value);
+                        }
+                        else {
+                            this.warn("Could not restore value for UI " + n.id + " : did not find saved value for input " + inputName);
+                        }
+                    }
+                }
+                else {
+                    // Wtf. A link exists with nothing in there. Is this a normal use case ??
+                }
+            }
+            else {
+                this.warn("UI component '" + n.desc.name + "' has more than 1 output. That's not allowed by import/export policy");
+            }
+        });
+    }
+
+    /**************************************************************************
+     * Profiling
+     *************************************************************************/
+    // Debug function to analyze the performances of an application.
+    analyzePerf(spacing = 0) {
+        if( !env.getProfiler() ) {
+            console.log("You need to activate profiling to be able to analyze the performances.");
+            return;
+        }
+
+        _.each(this.modules, function(m) {
+            var perf = m.getPerformances();
+            var parallel = m.parallel ? " (parallel)" : "";
+
+            // build the style of the output depending of the total time passed in the module (ms)
+            if( env.browser ) {
+                if( perf.total < 100 ) {
+                    var style = "background-color: #fff;";
+                }
+                else if( perf.total < 500 ) {
+                    var style = "background-color: #ffffcc;";
+                }
+                else if( perf.total < 1000 ) {
+                    var style = "background-color: #ffd1b3;";
+                }
+                else {
+                    var style = "background-color:  #ff9999;";
+                }
+
+                console.log("%s%c%s%s: min: %s, max: %s, avg: %s, total: %s", "\xa0".repeat(spacing), style, m.getOriginalId(),
+                    parallel, perf.min, perf.max, perf.avg, perf.total);
+            }
+            else {
+                console.log("%s%s%s: min: %s, max: %s, avg: %s, total: %s", " ".repeat(spacing), m.getOriginalId(),
+                    parallel, perf.min, perf.max, perf.avg, perf.total);
+            }
+
+            // if it's a metamodule, recursive call on subapp
+            if( m.app ) {
+                // if it's a loop, analyze the looperNode app. Otherwise, analyze the app
+                if( m.loop ) {
+                    m.looperNode.app.analyzePerf(spacing+2);
+                }
+                else {
+                    m.app.analyzePerf(spacing+2);
+                }
+            }
+        });
+    }
+
+    clearPerformances(){
+        if( !env.getProfiler() ) {
+            console.log("You need to activate profiling to be able to clear the performances.");
+            return;
+        }
+
+        _.each(this.modules, function(m) {
+            var perf = m.clearPerformances();
+            var parallel = m.parallel ? " (parallel)" : "";
+
+            // if it's a metamodule, recursive call on subapp
+            if( m.app ) {
+                // if it's a loop, analyze the looperNode app. Otherwise, analyze the app
+                if( m.loop ) {
+                    m.looperNode.app.clearPerformances();
+                }
+                else {
+                    m.app.clearPerformances();
+                }
+            }
+        });
+    }
+
+    /**************************************************************************
+     * Debug
+     *************************************************************************/
+
+    // Debug function to analyze the state of an application.
+    // If the application is stuck, will output the responsible nodes and dump it
+    analyzeState(spacing = 0) {
+        console.log("\xa0".repeat(spacing) + "* Analyzing state: app " + this.id);
+
+        // start the analysis from the output parameters
+        var outputParams = this.getOutputParameters();
+        for(var i=0; i<outputParams.length; i++) {
+            var outputModuleName = this.getOutputModuleName( outputParams[i] );
+            var outputModule = this.nodes[outputModuleName];
+
+            console.log('Analyzing: ' + outputModule.id);
+            outputModule.analyzeState(spacing + 2);
+        }
+    }
+
+    // extract the snapshot JSON of this app, decorated with the state and the values of every module
+    getSnapshot() {
+        var json = _.cloneDeep(this.originalJSON);
+        var map;
+        json.snapshot = true;
+        if( this.isRootApp() ) {
+            var recordMap = this.recordMap;
+        }
+        else {
+            var recordMap = this.getRootApp().recordMap;
+        }
+
+        var incName = function( name ) {
+            if( name.match(/_\d+$/g) ) {
+                return name.replace(/\d+$/g, n => n*1+1);
+            }
+            else {
+                return name + "_2";
+            }
+        }
+
+        var parser = new AppParser(json);
+        _.each(this.nodes, (n, id) => {
+            // remove from id our app prefix
+            var localId = id.replace(this.id + ">", "");
+            parser.findNode(localId, (njson) => {
+                njson.snapshot = {
+                    state: {
+                        status: n.status,
+                        invalidateSent: n.invalidateSent,
+                        readSent: n.readSent,
+                        allowedToRestart: n.allowedToRestart,
+                        evaluating: n.evaluating,
+                        initialized: n.initialized,
+                    },
+                    data: n.getInputsData(recordMap),
+                    cache: n.getCache(recordMap),
+                    times: n.getTimes(),
+                    performances: env.getProfiler() && n.getPerformances && n.getPerformances(),
+                }
+
+                // if we are in a module that is a metanode, recurse
+                if( njson.module && !parser.isDualboxComponent(njson.module) ) {
+                    // if there's already a snapshot for this metanode, rename our metanode
+                    var mnode = json.metanodes[njson.module];
+                    if( mnode && mnode.snapshot ) {
+                        var newName = incName(njson.module);
+                        njson.module = newName;
+                        json.metanodes[newName] = n.getApp().getSnapshot();
+                    }
+                    else {
+                        // it's a metanode, get its snapshot too and replace metanode definition
+                        json.metanodes[njson.module] = n.getApp().getSnapshot();
+                    }
+                }
+            });
+        });
+
+        if( this.isRootApp() ) {
+            // Now, convert our map into a JSON dictionary
+            json.snapshotObjects = {};
+            recordMap.forEach( (value, key, map) => {
+                json.snapshotObjects[value] = Type.safeSerialize(key);
+            });
+        }
+
+        return json;
+    }
+
+    yyyymmddhhss() {
+        var d = new Date();
+        function pad2(n) {  // always returns a string
+            return (n < 10 ? '0' : '') + n;
+        }
+
+        return d.getFullYear() + "-" +
+               pad2(d.getMonth() + 1) + "-" +
+               pad2(d.getDate()) + "-" +
+               pad2(d.getHours()) + "-" +
+               pad2(d.getMinutes()) + "-" +
+               pad2(d.getSeconds());
+    }
+
+    downloadSnapshot() {
+        var snapshot = this.getSnapshot();
+        var text = JSON.stringify(snapshot);
+
+        // build name if we now the app
+        if( this.instanceData ) {
+            var name = this.instanceData["app"] + "_" +
+                (this.instanceData["version"] || this.instanceData["phase"]) + "_" +
+                + this.yyyymmddhhss() + ".json";
+        }
+        else {
+            var name = "snapshot_" + this.yyyymmddhhss() + ".json";
+        }
+
+        this.download(text, name);
+    }
+
+    download( text, name ) {
+        var blob = new Blob([text], { "type" : "application/octet-stream" });
+
+        if( window ) {
+            var a = document.createElement('a');
+            a.href = window.URL.createObjectURL(blob);
+            a.download = name;
+
+            // simulate a click on the link
+            if (document.createEvent) {
+                var event = document.createEvent("MouseEvents");
+                event.initEvent("click", true, true);
+                a.dispatchEvent(event);
+            } else {
+                a.click();
+            }
+        }
+    }
+}
+
+module.exports = App;
+

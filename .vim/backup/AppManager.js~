@@ -1,0 +1,61 @@
+/**
+ *  This object is in charge of managing the application state
+ */
+
+import { _ } from 'lodash';
+
+class AppManager {
+    constructor(view, div) {
+        this.div = div;
+        this.app = null;
+        this.loaded = false;
+    }
+
+    kill() {
+        if( this.app ) {
+            this.app.kill();
+            this.app = null;
+        }
+    }
+
+    load(cb) {
+        if( this.loaded ) {
+            cb();
+        }
+        else {
+            /* todo: load dynamically .js ressources from the app */
+            this.loaded = true;
+            cb();
+        }
+    }
+
+    run(json, options, cb) {
+        this.kill(); // ensure we don't run it twice
+        if( typeof DualBox != "undefined" ) {
+            options.json = json;
+            options.translations = null;
+            options.lang = null;
+            options.div = this.div;
+            options.profiler = options.profiler || false;
+            options.logLevel = options.logLevel || false;
+            options.options = options.options || {};
+            options.options.NoVersionCheck = options.options.NoVersionCheck || true;
+            options.options.debug = options.options.debug || false;
+            options.options.debug.makeSynchrone = options.options.debug.makeSynchrone || false;
+            options.options.debug.removeTryCatch = options.options.debug.removeTryCatch || false;
+            options.options.debug.record = options.options.debug.record || false;
+
+            this.app = DualBox.start(options);
+            this.app.start(cb);
+        }
+        else {
+            setTimeout( this.run.bind(this, json, options, cb), 1000 );
+        }
+    }
+
+    getSnapshot() {
+        return this.app.getSnapshot();
+    }
+}
+
+export default AppManager;

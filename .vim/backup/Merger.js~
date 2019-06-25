@@ -1,0 +1,357 @@
+/**
+ *   Object to perform a "good-enough" merge
+ *   merges a set of boxes into a metanode with the minimal set of input/output
+ *   needed to preserve the actual app behavior
+ */
+
+import _ from 'lodash';
+import utils from './DualboxUtils';
+
+class Merger {
+    constructor(model, ids) {
+        this.m = model;
+        this.ids = ids;
+
+        // the future metabox definition
+        this.def = {
+            desc: "",
+            metanodes: {},
+            input: {},
+            output: {},
+            modules: {},
+        }
+
+        this.nodes = [];
+        _.each(ids, (id) => {
+            this.nodes.push( this.m.getNode(id) );
+        });
+
+        this.id = null;
+
+        // links from and to outside
+        this.inboundLinksFromOutside = [];
+        this.outboundLinksToOutside  = [];
+    }
+
+    // merge all divs into a metabox
+    // ids: array of ids from the boxes to be merged
+    // metaboxName: name of the new metabox
+    // metaboxDesc: description of the new metabox
+    merge( metaboxName, metaboxDesc ) {
+        this.def.desc = metaboxDesc;
+
+        this.m.history.batch( () => {
+            // 0. create a new ID for our metanode
+            this.id = metaboxName + '-' + utils.randomString(8);
+
+            // 0. set a better position for the nodes
+            var bbox = this._computeBbox();
+            this._repositionNodes();
+
+            // 1. collect and detach the links from and to outside the metanode
+            this._collectAndDetachExternalLinks();
+
+            // 2. create the metabox inputs and outputs, and update the links definitions
+            this._createInputs();
+            this._createOutputs();
+
+            // 3. move the nodes to the new structure
+            this._moveNodes();
+
+            // 4. bind our nodes to the new inputs and outputs
+            this._bindInputs();
+            this._bindOutputs();
+
+            // 5. Our metanode definition is ready, add it to the app
+            this.m.data.app.metanodes = this.m.data.app.metanodes || {};
+            this.m.data.app.metanodes[ metaboxName ] = this.def;
+
+            // 6. Create a new node from this def
+            this.m.data.app.modules[this.id] = {
+                "module" : metaboxName,
+                "version": "*",
+                "graph"  : {
+                    "position" : {
+                        top  : (bbox.top + bbox.bottom) / 2,
+                        left : (bbox.left + bbox.right) / 2
+                    }
+                }
+            };
+
+            // 7. link our node to the rest of the graph
+            this._bindMetanodeInputs();
+            this._bindMetanodeOutputs();
+        });
+    }
+
+    _debug() {
+        console.log( this.def );
+    }
+
+    _isInMetanode( id ) {
+        var inGroup = false;
+        _.each( this.nodes, (node) => {
+            if( node.id === id ) {
+                inGroup = true;
+                return false; // eol
+            }
+        });
+        return inGroup;
+    }
+
+    // find the links from and to outside the metanode
+    _collectAndDetachExternalLinks() {
+        _.each( this.nodes, (node) => {
+            var links = node.getInboundLinks();
+            _.each( links, (link) => {
+                if( !this._isInMetanode(link.sourceId) ) {
+                    link.detach(); // we don't need this link anymore
+                    this.inboundLinksFromOutside.push( link );
+                }
+            });
+
+            var links = node.getOutboundLinks();
+            _.each( links, (link) => {
+                if( !this._isInMetanode(link.targetId) ) {
+                    link.detach();
+                    this.outboundLinksToOutside.push( link );
+                }
+            });
+        });
+    }
+
+    // transform "cond" into "cond2", or "cond3" if cond2 is taken, etc.
+    _nextName( type, name ) {
+        // find the appropriate number end (that is not taken already)
+        var ending = 2;
+        if( type == "input" ) {
+            while( this.def.input[ name + "-" + ending ] ) ending++;
+        }
+        else {
+            while( this.def.output[ name + "-" + ending ] ) ending++;
+        }
+        return name+"-"+ending;
+    }
+
+    // find and create the metabox inputs
+    _createInputs() {
+        // dic of input -> link (that created this input)
+        var inputToLinks = {};
+
+        // function to find the inputName corresponding to this link's source
+        // (if it has been created already)
+        var getInputNameForThisLink = function(l) {
+            var r = null;
+            _.each(inputToLinks, (link, inputName) => {
+                if( link.sourceId == l.sourceId && link.sourceOutput == l.sourceOutput ) {
+                    r = inputName;
+                    return false;
+                }
+            })
+            return r;
+        }
+
+        // the inputs are determined from the inbound links of the metanode
+        _.each(this.inboundLinksFromOutside, (link, index) => {
+            var targetNode = link.getTargetNode();
+
+            // get the original input name, rename if necessary
+            var inputName = link.targetInput;
+            if( this.def.input[inputName] ) {
+                // the input already exists. Check if the link that led to the creation of this
+                // input have the same source that 'link'. Otherwise, we create another input.
+                var l = inputToLinks[inputName];
+
+                // check if an input for this source has already been created
+                // otherwise, create a new one
+                var lookupInputName = getInputNameForThisLink(link);
+                inputName = lookupInputName ? lookupInputName : this._nextName("input", inputName);
+            }
+
+            this.def.input[ inputName ] = {
+                type: targetNode.getInputType( link.targetInput ),
+                graph: {
+                    position: this._computeInputSmartPosition(index)
+                }
+            }
+
+            // update the link with the new target, but don't attach it yet
+            // (the metanode isnt created yet)
+            link.nextTargetId = this.id;
+            link.nextTargetInput = inputName;
+
+            // save our link in the dictionary
+            inputToLinks[ inputName ] = link;
+        });
+    }
+
+    // create the metabox outputs
+    _createOutputs() {
+        // the inputs are determined from the inbound links of the metanode
+        _.each(this.outboundLinksToOutside, (link, index) => {
+            var sourceNode = link.getSourceNode();
+
+            var outputName = link.sourceOutput;
+            if( this.def.output[ outputName ] ) {
+                // check if the source of the output is the same as this link
+                var outputLink = this.def.output[outputName].link;
+                var sourceId = _.keys(outputLink)[0];
+                var sourceOutput = outputLink[sourceId];
+
+                if( !(link.sourceId == sourceId && link.sourceOutput == sourceOutput) ) {
+                    // the output already exists. we need to create another one.
+                    outputName = this._nextName("output", outputName);
+                }
+            }
+
+            var l = {};
+            l[link.sourceId] = link.sourceOutput;
+            this.def.output[ outputName ] = {
+                type: sourceNode.getOutputType( link.sourceOutput ),
+                graph: {
+                    position: this._computeOutputSmartPosition(index)
+                },
+                link: l
+            }
+
+            // update the link with the new target, but don't attach it yet
+            // (the metanode isnt created yet)
+            link.nextSourceId = this.id;
+            link.nextSourceOutput = outputName;
+        });
+    }
+
+    _repositionNodes() {
+        // find the lowest left, top coordinates to reposition nodes from there
+        var top = Number.MAX_SAFE_INTEGER;
+        var left = Number.MAX_SAFE_INTEGER;
+        _.each(this.nodes, (node) => {
+            var pos = node.getPosition();
+            if( pos.top < top ) top = pos.top;
+            if( pos.left < left ) left = pos.left;
+        });
+
+        // we want to put theses node to 50px top and 50px left, so compute the diff
+        var topdiff = top - 50;
+        var leftdiff = left - 250;
+        if( topdiff < 0 ) topdiff = 0;
+        if( leftdiff < 0 ) leftdiff = 0;
+
+        // reposition all nodes
+        _.each(this.nodes, (node) => {
+            var pos = node.getPosition();
+            pos.left = pos.left - leftdiff;
+            pos.top = pos.top - topdiff;
+            node.setPosition(pos);
+        });
+    }
+
+    _moveNodes() {
+        // move the nodes into the Metamodule def
+        _.each(this.nodes, (node) => {
+            if( node.isMetanode() ) {
+                // move the metanode definition too
+                this.def.metanodes[ node.def.module ] = node.getMetanodeDefinition();
+            }
+
+            // move the node module definition (preserving the links between metabox's node)
+            this.def.modules[node.id] = this.m.data.app.modules[ node.id ];
+            delete this.m.data.app.modules[node.id];
+
+            if( node.isMetanode() ) {
+                // if the metanode isn't still in use in the main app, remove def from here
+                if( !this.m.isMetanodeUsed(node.def.module) ) {
+                    delete this.m.data.app.metanodes[node.def.module];
+                }
+            }
+        });
+    }
+
+    _bindInputs() {
+        _.each(this.inboundLinksFromOutside, (link) => {
+            // we created an input with the same name, bind it to it
+            this.def.modules[link.targetId].links[link.targetInput] = { "input" : link.nextTargetInput };
+        });
+    }
+
+    _bindOutputs() {
+        _.each(this.outboundLinksToOutside, (link) => {
+            // we created an output with the same name, bind it to it
+            this.def.output[link.nextSourceOutput].link = {};
+            this.def.output[link.nextSourceOutput].link[link.sourceId] = link.sourceOutput;
+        });
+    }
+
+    _bindMetanodeInputs() {
+        _.each(this.inboundLinksFromOutside, (link) => {
+            link.targetId = link.nextTargetId;
+            link.targetInput = link.nextTargetInput;
+            link.attach();
+        });
+    }
+
+    _bindMetanodeOutputs() {
+        _.each(this.outboundLinksToOutside, (link) => {
+            link.sourceId = link.nextSourceId;
+            link.sourceOutput = link.nextSourceOutput;
+            link.attach();
+        });
+    }
+
+
+    // compute the bbox of all divs beeing merged, position the new div in the middle
+    _computeBbox() {
+        var most = {
+            top:    +Infinity,
+            bottom: -Infinity,
+            left:   +Infinity,
+            right:  -Infinity
+        };
+
+        _.each( this.nodes, (node) => {
+            var pos = node.getPosition();
+            if( pos.top < most.top ) most.top = pos.top;
+            if( pos.top > most.bottom ) most.bottom = pos.top;
+            if( pos.left < most.left ) most.left = pos.left;
+            if( pos.left > most.right ) most.right = pos.left;
+        });
+
+        return most;
+    }
+
+    _getPositioningValues() {
+        // todo: get a better system with the real bbox
+        return {
+            width       : 100,
+            height      : 80,
+            hMargin     : 80,
+            vMargin     : 20,
+            divAvgWidth : 150
+        }
+    }
+
+    // compute the "smart" position of the 'i'th input
+    _computeInputSmartPosition(i) {
+        var most = this._computeBbox();
+        var v = this._getPositioningValues();
+        return {
+            top: most.top + (v.height + v.vMargin) * i,
+            left: most.left - (v.width + v.hMargin),
+        }
+    }
+
+    // compute the "smart" position of the 'i'th output
+    _computeOutputSmartPosition(i) {
+        var most = this._computeBbox();
+        var v = this._getPositioningValues();
+        return {
+            top: most.top + (v.height + v.vMargin) * i,
+            left: most.right + v.divAvgWidth + (v.width + v.hMargin),
+        }
+    }
+}
+
+module.exports = Merger;
+
+
+

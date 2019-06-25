@@ -1,0 +1,107 @@
+/* eslint-env es6 */
+var css = require('css');
+var fs = require('fs-extra');
+var path = require('path');
+
+var bootstrapPath = path.dirname(require.resolve('bootstrap/package.json'));
+
+var prefix = '.dualbox';
+var container = '.dualbox-container'
+var inFile = path.join(bootstrapPath, 'dist/css/bootstrap.css');
+var outFile = 'dist/css/dualbox-bootstrap.css';
+var cssDir = "./dist/css";
+
+if( !fs.existsSync('./dist') ) {
+    fs.mkdirSync('./dist');
+}
+if( !fs.existsSync('./dist/css') ) {
+    fs.mkdirSync('./dist/css');
+}
+if( fs.existsSync('./dist/fonts') ) {
+    fs.removeSync('./dist/fonts');
+}
+
+function prefixSelector(sel){
+    if (sel.match(/^@/)) return sel;
+    var m = sel.match(/(^| )(body|html)($|\W.*)/i);
+    if (m)
+        return m[1] + container + m[3];
+    else
+        return prefix + ' ' + sel;
+}
+
+function prefixNode(node) {
+    if (node.selectors) {
+        node.selectors = node.selectors.map(prefixSelector);
+    } else if (node.stylesheet) {
+        node.stylesheet.rules.forEach(prefixNode);
+    } else if (node.rules) {
+        node.rules.forEach(prefixNode);
+    }
+}
+
+// build the css file with .dualbox and .dualbox-container as a prefix
+fs.removeSync(outFile);
+var cssAst = css.parse(fs.readFileSync(inFile, 'utf8'));
+prefixNode(cssAst);
+fs.writeFileSync(outFile, css.stringify(cssAst));
+
+// copy the fonts
+console.log("Copying font files...");
+fs.copySync(path.join(bootstrapPath, 'dist/fonts/'), 'dist/fonts/');
+
+// now, inline the font into css using base64
+var inlineFont = function( filePath ) {
+    // read binary data
+    var bitmap = fs.readFileSync(filePath);
+
+    // convert binary data to base64 encoded string
+    var base64 = new Buffer(bitmap).toString('base64');
+
+    return "url(data:font/truetype;charset=utf-8;base64," + base64 + ")";
+};
+
+var getFontPath = function( urlFontPath ) {
+    var fontFilePath = urlFontPath;
+    if( fontFilePath.indexOf('?') !== -1 ) {
+        fontFilePath = fontFilePath.split('?')[0];
+    }
+    if( fontFilePath.indexOf('#') !== -1 ) {
+        fontFilePath = fontFilePath.split('#')[0];
+    }
+    fontFilePath = "./" + path.join(cssDir, fontFilePath);
+    return fontFilePath;
+};
+
+// for each css file
+fs.readdir(cssDir, (err, files) => {
+    files.forEach(file => {
+        var cssFilePath = path.join(cssDir, file);
+        var fileContent = fs.readFileSync(cssFilePath, "utf8");
+        console.log('Base64 inlining fonts in css file: ' + cssFilePath);
+
+        // find the url() definitions
+        var regexpString = new String(fileContent);
+        var urlRegexp = /url\('(.*?)'\)*/g;
+        var match = urlRegexp.exec(regexpString);
+        while (match != null) {
+            // find the font file
+            var originalUrl = match[0];
+
+            // get the font file path (clean path)
+            var fontFilePath = getFontPath( match[1] );
+
+            // convert them to dataURI
+            var fontDataURI = inlineFont( fontFilePath );
+
+            // replace it in the original string
+            console.log('   replacing ' + originalUrl + ' with inlined version');
+            fileContent = fileContent.replace(originalUrl, fontDataURI);
+
+            match = urlRegexp.exec(fileContent);
+        }
+
+        // when done, overwrite the css file
+        fs.writeFile(cssFilePath, fileContent);
+    });
+})

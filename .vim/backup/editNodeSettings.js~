@@ -1,0 +1,289 @@
+const swal = require('sweetalert2');
+const _ = require('lodash');
+
+const JSONEditor = require('@dualbox/dualbox-lib-jsoneditor');
+
+var TemplateBinds = function(view, div, data) {
+    var node = data.node;
+    var pkg  = node.getPackage();
+    var editor = null;
+
+    div.ready(() => {
+        // Add the example div
+        $('.module-left-signature').html("");
+        $('.module-left-signature').append(
+            $('<div/>', {
+                'class' : 'dualbox-graph-canvas',
+                'style': 'overflow: visible; padding-left: 40px; padding-right: 40px; width: 100%; background-color: transparent; border: none;'
+            })
+        )
+        view.templateMgr.appendTemplate($('.module-left-signature .dualbox-graph-canvas'),
+            "graphNode",
+            { pkg: node.getPackage(), id: node.id, n: view.m.createExampleNode(pkg.name, node.id), example: true, utils: view.utils },
+            (div) => {
+                $(div).ready(() => {
+                    // remove the "position: absolute;" that messes up the display
+                    var card = $('.module-left-signature .dualbox-graph-canvas .card');
+                    card.css('position', 'static').css('point-events', 'none');
+                    card.find('.point').css("visibility", "visible").find('svg').css("visibility", "visible");
+                    card.ready(()=> {
+                        var width = Math.max(
+                            card.find('.inputs').width() + card.find('.outputs').width(),
+                            card.find('.title').width() + 60),
+                            card.find('.subtitle').width() + 40)
+                        );
+                        card.css('width', width + 'px');
+                        card.addClass('mx-auto');
+                    });
+                });
+            }
+        );
+
+
+        div.find('.input-visibility-toggle').change( function(e) {
+
+        });
+
+        div.find('.output-visibility-toggle').change( function(e) {
+
+        });
+
+        div.find('.btn-edit-dualbox-node-name').click(function(e) {
+            div.find('.dualbox-node-name').hide();
+            div.find('.dualbox-node-name-edit').show();
+        });
+
+        div.find('.btn-save-node-name-change').click(function(e) {
+            var oldId = $(this).data('id');
+            var newId = $(this).parent().find('.dualbox-node-name-input').val();
+            var type = $(this).data('type');
+            view.c.renameBox(oldId, newId, type);
+        });
+
+        div.find('.dualbox-node-name-input').keypress(function(e) {
+            // user pressed enter
+            if(e.which == 13 || e.keyCode == 13) {
+                var oldId = $(this).parent().find('.btn-save-node-name-change').data('id');
+                var newId = $(this).val();
+                var type = $(this).data('type');
+                view.c.renameBox(oldId, newId, type);
+                return false;
+            }
+        });
+
+        div.find('.input-iterator-toggle').change(function(e) {
+            var destId = $(this).attr('data-id');
+            var destInput = $(this).attr('data-input');
+            if( $(this).is(":checked") ) {
+                view.c.setIterator( destId, destInput );
+            }
+            else {
+                view.c.unsetIterator( destId, destInput );
+            }
+        });
+
+        div.find('.select-widget-registerTo').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var targetId = $(this).val();
+            view.c.registerWidget(nodeId, targetId);
+        });
+
+        div.find('.select-output-feedback').change(function(e) {
+            var val = $(this).val();
+            var destId = $(this).attr('data-id');
+            var destOutput = $(this).attr('data-output');
+            if( val !== "none" ) {
+                view.c.setFeedback( destId, destOutput, val );
+            }
+            else {
+                view.c.unsetFeedback( destId, destOutput );
+            }
+        });
+
+        div.find('.btn-remove-event').click(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var index = parseInt($(this).attr('data-index'));
+            view.c.removeEvent( nodeId, index );
+        });
+
+        div.find('.event-if').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var index = parseInt($(this).attr('data-index'));
+            var val = $(this).val();
+            view.c.setEventIf( nodeId, index, val );
+        });
+
+        div.find('.event-data').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var index = parseInt($(this).attr('data-index'));
+            var val = $(this).val();
+            view.c.setEventData( nodeId, index, val );
+        });
+
+        div.find('.select-event-target').change(function(e) {
+            var target = $(this).val();
+
+            // change options of closest .select-event-name according to this new target
+            var targetNode = view.m.getNode(target);
+            var targetEvents = targetNode.getEventsNames();
+            var select = $(this).closest('tr').find('.select-event-name');
+            select.html('');
+            _.each(targetEvents, (eventName) => {
+                select.append( $('<option/>', {
+                    value: eventName
+                }).append(eventName));
+            });
+
+            var nodeId = $(this).attr('data-id');
+            var index = parseInt($(this).attr('data-index'));
+            view.c.setEventTarget( nodeId, index, target );
+        });
+
+        div.find('.select-event-name').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var index = parseInt($(this).attr('data-index'));
+            var val = $(this).val();
+            view.c.setEventName( nodeId, index, val );
+        });
+
+        div.find('.input-cache-toggle').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var val = $(this).is(':checked');
+            view.c.setBoxCache( nodeId, val );
+        });
+
+        div.find('.input-worker-toggle').change(function(e) {
+            var nodeId = $(this).attr('data-id');
+            var val = $(this).is(':checked');
+            if( val ) { div.find('.worker-warning').show() }
+            else { div.find('.worker-warning').hide() }
+            view.c.setBoxParallel( nodeId, val );
+        });
+
+        div.find('.edit-module-description').click(function(e) {
+            var id = $(this).attr('data-id');
+            var desc = $(this).attr('data-desc');
+
+            swal({
+                title: "Describe what this metabox does",
+                input: "textarea",
+                inputValue: desc || "",
+                showCancelButton: true,
+                closeOnConfirm: false,
+                showLoaderOnConfirm: true,
+                animation: "slide-from-top",
+                inputPlaceholder: "This metabox..."
+            }).then( (result) => {
+                if (result.value === "") {
+                    swal.showInputError("You need to write something!");
+                    return false;
+                }
+                else {
+                    view.c.setMetanodeDescription(id, result.value);
+                }
+            });
+        });
+
+        div.find('.add-node-comment, .node-comment-text').click(function(e) {
+
+        });
+
+        div.find('.btn-save-comment').click(function(e) {
+
+        });
+
+        div.find('.btn-delete-comment').click(function(e) {
+
+        });
+
+        div.find('.btn-add-event').click(function(e) {
+
+        });
+
+        div.find('.setValue').click(function(e) {
+        });
+
+        // set up the modal control (for setting a value)
+        var modalSetValue = div.find('.edit-value-modal');
+        modalSetValue.find('.set-value-type').change(function(e) {
+            if( $(this).is(':checked') ) {
+                modalSetValue.find('.has-value').show();
+            }
+            else {
+                modalSetValue.find('.has-value').hide();
+            }
+
+            var valueType = modalSetValue.find('.choose-value-type').val();
+            modalSetValue.find('.define-value.define-' + valueType).show();
+        });
+
+        modalSetValue.find('.choose-value-type').change(function(e) {
+            var valueType = $(this).val();
+            modalSetValue.find('.define-value').hide();
+            modalSetValue.find('.define-' + valueType).show();
+        });
+
+        modalSetValue.find('.btn-save').click(function(e) {
+            var val;
+            if( modalSetValue.find('.unset-value').is(':checked') ) {
+                // remove default value
+                val = undefined;
+            }
+            else if( modalSetValue.find('.set-value-null').is(':checked') ) {
+                val = null;
+            }
+            else {
+                var type = modalSetValue.find('.choose-value-type').val();
+                switch( type ) {
+                case "string":  val = modalSetValue.find('.text-value').val(); break;
+                case "number":  val = parseFloat(modalSetValue.find('.number-value').val()); break;
+                case "boolean": val = modalSetValue.find('.bool-value').val() == "true"; break;
+                case "object":  val = editor.get(); break;
+                default:
+                    throw "cant recognize type: " + type;
+                }
+            }
+
+            // set the new value
+            var destId =   modalSetValue.attr('data-id');
+            var destName = modalSetValue.attr('data-name');
+            var destType = modalSetValue.attr('data-type'); // "attr" or "input"
+            if( destType == "default" ) {
+                view.m.getNode(destId).setDefaultValue(val);
+            }
+            else {
+                if(val !== undefined) {
+                    view.m.getNode(destId).val( destType, destName, val );
+                    view.m.getNode(destId).setInputVisibility(destName, false);
+                }
+                else {
+                    view.m.getNode(destId).deleteVal( destType, destName );
+                }
+            }
+            modalSetValue.modal('hide');
+
+            var field = $('.' + destType + '-' + destId + '-' + destName); // the display field
+            if( val === undefined ) {
+                field.text("");
+            }
+            else if ( val === null ) {
+                field.text("null");
+            }
+            else {
+                switch(type) {
+                case "string":  field.text( '"' + val + '"'); break;
+                case "number":  field.text(val); break;
+                case "boolean": field.text(val ? "true" : "false"); break;
+                case "object":  field.text('[Object]'); break;
+                default:
+                    throw "cant recognize type: " + type;
+                }
+            }
+
+            view.repaint();
+            view.openBoxSettings(destId);
+        });
+    });
+};
+
+module.exports = TemplateBinds;

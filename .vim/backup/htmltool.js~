@@ -1,0 +1,73 @@
+//const himalaya = require('himalaya');
+//const toHTML = require('himalaya/translate').toHTML;
+const himalaya = require('./himalaya/index');
+const toHTML = require('./himalaya/translate').toHTML;
+const html = require('html');
+const x2js = require('x2js');
+const _ = require('lodash');
+
+// integrate the DualBox "nodes" inside HTML component
+
+
+function trimHTML( html ) {
+    var s = "";
+    var noSpaces = false;
+    var noSpaceString = "";
+    for(var i=0; i<html.length; i++) {
+        if( html[i] == ">" ) {
+            noSpaces = true;
+        }
+        else if( html[i] == "<" ) {
+            noSpaces = false;
+            s += noSpaceString.replace(/\s/g, '');
+            noSpaceString = "";
+        }
+        else if( /\s/.test( html[i] ) ) {
+            // if character is a whitespace, do nothing
+        }
+        else {
+            // if character is not <, > or whitespace, cut the noSpace
+            noSpaces = false;
+            s += noSpaceString.replace(/\s/g, '');
+            noSpaceString = "";
+        }
+
+        if( noSpaces ) {
+            noSpaceString += html[i];
+        }
+        else {
+            s += html[i];
+        }
+    }
+
+    return s + noSpaceString;
+}
+
+function json2html(json) {
+    json = JSON.parse(JSON.stringify(json));
+    return html.prettyPrint(toHTML(json));
+}
+
+function html2json(html) {
+    // remove all whitespaces to avoid empty divs
+    var html = trimHTML(html);
+    return (himalaya.parse(html))[0];
+}
+
+function xml2json( xml ) {
+    var converter = new x2js();
+    return converter.xml2js( xml );
+}
+
+function json2xml( json ) {
+    var converter = new x2js();
+    return converter.js2xml( json );
+}
+
+module.exports = {
+    "xml2json"  : xml2json,
+    "json2xml"  : json2xml,
+    "htmlPrettyPrint" : html.prettyPrint,
+    "html2json" : html2json,
+    "json2html" : json2html
+}

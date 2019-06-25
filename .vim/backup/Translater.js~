@@ -1,0 +1,174 @@
+import _ from 'lodash';
+
+class Translater {
+    constructor(parent, container, canvas) {
+        this.parent = parent;
+        this.container = container;
+        this.canvas = canvas;
+
+        this.translating = false;
+
+        this.startEventHandler = this.onTranslateStart.bind(this);
+        this.moveEventHandler  = this.onTranslateMove.bind(this);
+        this.stopEventHandler  = this.onTranslateStop.bind(this);
+
+        this.originalOffset = this.canvas.offset();
+
+        this.x = null;
+        this.y = null;
+
+        this.dragging = false;
+    }
+
+    getTranslation() {
+        return {
+            top:  this.canvas.offset().top - this.originalOffset.top,
+            left: this.canvas.offset().left - this.originalOffset.left
+        }
+    }
+
+    setTranslation( t ) {
+        this.canvas.offset({
+            top: this.originalOffset.top + t.top,
+            left: this.originalOffset.left + t.left,
+        });
+    }
+
+    translate( t ) {
+        this.canvas.offset({
+            top:  this.canvas.offset().top + t.top,
+            left: this.canvas.offset().left + t.left
+        });
+    }
+
+    initialize() {
+        this.container.off('mousedown', this.startEventHandler);
+        $(document).off('mousemove', this.moveEventHandler);
+        $(document).off('mouseup',   this.stopEventHandler);
+        this.container.on('mousedown', this.startEventHandler);
+        $(document).on('mousemove', this.moveEventHandler);
+        $(document).on('mouseup',   this.stopEventHandler);
+
+        // override the context menu default behavior
+        this.container.off('contextmenu');
+        this.container.on('contextmenu', (e) => {
+            if( !this.isCapturingRightClick(e.target) ) {
+                e.stopPropagation();
+                e.preventDefault();
+                return false;
+            }
+        });
+    }
+
+    isCapturingRightClick(target) {
+        return $(target).closest('.capture-right-click').length !== 0;
+    }
+
+    onTranslateStart(e) {
+        if( e.which === 3 && !this.isCapturingRightClick(e.target) && $('.capture-right-click:hover').length == 0 ) { // right click
+            if( !$('div:hover').is('.contextmenu') ) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+
+            //console.log('[TRANSLATION] start');
+            this.translating = true;
+            this.container.addClass('translating');
+
+            this.x = e.pageX;
+            this.y = e.pageY;
+
+            this.dragging = false;
+        }
+    }
+
+    onTranslateMove(e) {
+        if( this.translating ) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            //console.log('[TRANSLATION] moving');
+            var translateX = this.x - e.pageX;
+            var translateY = this.y - e.pageY;
+
+            var offset = this.canvas.offset();
+            this.canvas.offset({
+                top:  offset.top - translateY,
+                left: offset.left - translateX
+            });
+
+            this.x = e.pageX;
+            this.y = e.pageY;
+
+            this.dragging = true;
+        }
+    }
+
+    onTranslateStop(e) {
+        if( this.translating && e.which === 3 ) {
+            if( this.dragging ) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+            else {
+                // there wasnt any movement, trigger a contextmenu here
+                if( !this.isCapturingRightClick(e.target) ) {
+                    $('.capture-right-click:hover').triggerHandler('contextmenu');
+                }
+            }
+
+            //console.log('[TRANSLATION] stop');
+            this.translating = false;
+            this.container.removeClass('translating');
+        }
+    }
+
+    // correct offset if the left menu is open
+    correctOffset( offset ) {
+        if( this.parent.view.isLeftMenuExpanded() ) {
+            offset.left += 465;
+        }
+        /*
+        if( this.view.isRightMenuExpanded() ) {
+            offset.left += 35;
+        }
+        */
+        return offset;
+    }
+
+    gotoTopLeft() {
+        var offset = this.correctOffset(_.clone(this.originalOffset));
+        this.canvas.offset(offset);
+        return new Promise((resolve) => this.canvas.ready(resolve));
+    }
+
+    gotoBottomLeft() {
+        var zoom = this.parent.view.zoom;
+        var offset = _.clone(this.originalOffset);
+        offset.top  += this.container.height() - this.canvas.height() * zoom - 2; /* canvas border */
+        offset = this.correctOffset(offset);
+        this.canvas.offset(offset);
+        return new Promise((resolve) => this.canvas.ready(resolve));
+    }
+
+    gotoTopRight() {
+        var zoom = this.parent.view.zoom;
+        var offset = _.clone(this.originalOffset);
+        offset.left += this.container.width() - this.canvas.width() * zoom - 2; /* canvas border */
+        offset = this.correctOffset(offset);
+        this.canvas.offset(offset);
+        return new Promise((resolve) => this.canvas.ready(resolve));
+    }
+
+    gotoBottomRight() {
+        var zoom = this.parent.view.zoom;
+        var offset = _.clone(this.originalOffset);
+        offset.top  += this.container.height() - this.canvas.height() * zoom - 2; /* canvas border */
+        offset.left += this.container.width() - this.canvas.width() * zoom - 2; /* canvas border */
+        offset = this.correctOffset(offset);
+        this.canvas.offset(offset);
+        return new Promise((resolve) => this.canvas.ready(resolve));
+    }
+}
+
+export default Translater;

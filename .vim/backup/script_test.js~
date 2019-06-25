@@ -1,0 +1,33 @@
+
+var ftp = require('ftp-get');
+var JSZip = require('jszip');
+
+ftp.get(
+    {url:"ftp://ru5147:wrOGnDwQ@sb25900.sdedi.net/DualBox/ressources/cubeMaps/mirroredLanscapeMountains.zip",bufferType:'buffer'},
+    function (error, data) {
+        console.log("Callback get...?");
+        if (error) {
+            console.error("Error in FtpLoader : " +error);
+        } else {
+            console.log("Ftp get OK");
+            console.log(data.length);
+            var buffer_string = data.toString('binary');
+            var buffer = Buffer.from(buffer_string, 'binary');
+
+            JSZip.loadAsync(buffer).then(
+                function (zip) {
+                    console.log("loadAsync callback");
+                    zip.file("diffuse/nx.png").async("base64").then(
+                        function(data){
+                            console.log("data:image/png;base64,"+data);
+                        }
+                    );
+                }
+            ).catch(
+                function(reason) {
+                    console.log('Handle rejected promise JSZip.loadAsync ('+reason+') here.');
+                }
+            );
+        }
+    }
+);

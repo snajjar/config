@@ -1,0 +1,30 @@
+var DualBox = require('@dualbox/dualbox');
+var description = require('./package.json');
+
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+/**
+ *  A simple number addition module for DualBox
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var NumberMultiply = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.parallel = false;
+    this.async = false;
+};
+NumberMultiply.prototype = Object.create(DualBox.Module.prototype);
+NumberMultiply.prototype.constructor = NumberMultiply;
+
+// [Abstract] See DualBox.Module
+NumberMultiply.prototype.compute = function(input, response){
+
+    var output = {
+        x : input.x1*input.x2
+    };
+
+    response.send(output);
+};
+
+module.exports = NumberMultiply;
+

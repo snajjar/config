@@ -1,0 +1,280 @@
+<style>
+    .card-debug .card-body {
+        font-size: 12px;
+        padding-left: 5px;
+        padding-right: 5px;
+    }
+</style>
+
+<template>
+<div class="card-debug h100" id="debug-node">
+    <div style="padding-left: 10px; padding-top: 10px; padding-right: 10px;">
+        <h2 class="edit-dualbox-node-id">
+            <div class="dualbox-node-name">
+                <span class="text-truncate d-inline-block" style="width: 290px">{{n.graphId}}</span>
+            </div>
+            <div class="dualbox-node-name-edit" style="display: none;">
+                <input type="text" class="form-control dualbox-node-name-input" style="display: inline-block;" :value="n.graphId" :data-type="n.type" autofocus/>
+                <button class="btn btn-primary btn-save-node-name-change" :data-id="n.graphId" :data-type="n.type" style="display: inline-block;">Save</button>
+            </div>
+        </h2>
+        <p><small class="edit-dualbox-node-package-name">{{n.getPackageName()}}</small></p>
+    </div>
+
+    <div class="edit-body">
+        <div class="card card-state">
+            <div class="card-header" id="debug-node-state" data-toggle="collapse" data-target="#debug-node-state-collapse" aria-expanded="true" aria-controls="debug-node-state-collapse">
+                <h5 class="mb-0 btn-link">State</h5>
+            </div>
+
+            <div id="debug-node-state-collapse" class="collapse show" aria-labelledby="debug-node-state" data-parent="#debug-node">
+                <div class="card-body" style="padding-left: 15px;">
+                    <table class="table-desc table-striped">
+                        <thead class="thead-dark">
+                            <th>Key</th>
+                            <th>Value</th>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>status</td>
+                                <td><span :class="{'card-status-idle':n.isSnapshotStatus(0),'card-status-computing':n.isSnapshotStatus(1),'card-status-awaiting-data':n.isSnapshotStatus(2), 'card-status-ready':n.isSnapshotStatus(3)}">{{ getSnapshotStatus(n) }}</span></td>
+                            </tr>
+                            <tr><td>invalidateSent</td><td>{{debug.state.invalidateSent}}</td></tr>
+                            <tr><td>readSent</td><td>{{debug.state.readSent}}</td></tr>
+                            <tr><td>allowedToRestart</td><td>{{debug.state.allowedToRestart}}</td></tr>
+                            <tr><td>evaluating</td><td>{{debug.state.evaluating}}</td></tr>
+                            <tr><td>initialized</td><td>{{debug.state.initialized}}</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+
+        <div v-if="n.hasInputs()" class="card card-settings">
+            <div class="card-header" id="debug-node-inputs" data-toggle="collapse" data-target="#debug-node-inputs-collapse" aria-expanded="false" aria-controls="debug-node-inputs-collapse">
+                <h5 class="mb-0 btn-link">Data <small><span class="badge badge-secondary">{{ n.getInputsNames().length }}</span></small></h5>
+            </div>
+            <div id="debug-node-inputs-collapse" class="collapse" aria-labelledby="debug-node-inputs" data-parent="#card-debug">
+                <div class="card-body">
+                    <table class="table-desc table-striped">
+                        <thead class="thead-dark">
+                            <th>Input</th>
+                            <th>Valid</th>
+                            <th>Type</th>
+                            <th>Value</th>
+                            <th>Default</th>
+                        </thead>
+                        <tbody>
+                            <tr v-if="key in n.getInputsNames()">
+                                <tr>
+                                    <td>
+                                        {{key}}
+                                        <button v-if="n.hasInputDesc(key)" type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" :title="n.getInputDesc(key)" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                    </td>
+                                    <td>{{ getInputData(key).valid }}</td>
+                                    <td>
+                                        <template v-if="getInputData(key).value">
+                                            <template v-if="getInputData(key).value.metadata && getInputData(key).value.metadata.type">{{getInputData(key).value.metadata}}</template>
+                                            <template v-else>{{typeof n.getSnapshotValue(getInputData(key).value) }}</template>
+                                        </template>
+                                    </td>
+                                    <td>
+                                        <template v-if="getInputData(key).value">
+                                            <display-value :n="n" :v="getInputData(key).value" type="default"></display-value>
+                                        </template>
+                                    </td>
+                                    <td>
+                                        <template v-if="getInputData(key).default">
+                                            <display-value :n="n" :v="getInputData(key).default" type="default"></display-value>
+                                        </template>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="debug.cache" class="card card-settings">
+            <div class="card-header" id="debug-node-cache" data-toggle="collapse" data-target="#debug-node-cache-collapse" aria-expanded="false" aria-controls="debug-node-cache-collapse">
+                <h5 class="mb-0 btn-link">Cache</h5>
+            </div>
+            <div id="debug-node-cache-collapse" class="collapse" aria-labelledby="debug-node-cache" data-parent="#card-debug">
+                <div class="card-body" style="padding-left: 15px;">
+                    <table class="table-desc table-striped">
+                        <thead class="thead-dark">
+                            <th>Output</th>
+                            <th>Value</th>
+                        </thead>
+                        <tbody>
+                            <tr v-for="key in Object.keys(debug.cache)">
+                                <tr>
+                                    <td>{{key}}</td>
+                                    <td><display-value :n="n" :v="this.n.m.getSnapshotValue(debug.cache[key])" type="default"></display-value></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="debug.times && debug.times.emissions && (debug.times.emissions.lastRead || debug.times.emissions.lastInvalidate || debug.times.emissions.lastData )" class="card card-settings">
+            <div class="card-header" id="debug-node-events" data-toggle="collapse" data-target="#debug-node-events-collapse" aria-expanded="false" aria-controls="debug-node-events-collapse">
+                <h5 class="mb-0 btn-link">Last events</h5>
+            </div>
+            <div id="debug-node-events-collapse" class="collapse" aria-labelledby="debug-node-events" data-parent="#card-debug">
+                <div class="card-body" style="padding-left: 15px;">
+
+                    <div v-if="debug.times.emissions.lastRead" class="mb-3">
+                        <p><b><u>Last read {{showNumber(debug.times.emissions.nbRead)}}</u> <span class="float-right">{{ showTime(debug.times.emissions.lastRead.date) }}</span></b></p>
+                        <span>Missing: <b>{{ debug.times.emissions.lastRead.data.join(', ') }}</b></span><br/>
+                    </div>
+
+                    <div v-if="debug.times.emissions.lastInvalidate" class="mb-3">
+                        <p><b><u>Last Invalidate {{showNumber(debug.times.emissions.nbInvalidate)}}</u> <span class="float-right">{{ showTime(debug.times.emissions.lastInvalidate.date) }}</span></b></p>
+                        <span>Invalidated keys: <b>{{ debug.times.emissions.lastInvalidate.data.join(', ') }}</b></span><br/>
+                    </div>
+
+                    <div v-if="debug.times.emissions.lastData" class="mb-3">
+                        <p><b><u>Last Data {{ showNumber(debug.times.emissions.nbData) }}</u> <span class="float-right">{{ showTime(debug.times.emissions.lastData.date) }}</span></b></p>
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Output</th>
+                                <th>Value</th>
+                            </thead>
+                            <tbody>
+                                <tr v-for="key in Object.keys(debug.times.emissions.lastData.data)">
+                                    <td>{{key}}</td>
+                                    <td><display-value :n="n" :v="this.n.m.getSnapshotValue(debug.times.emissions.lastData.data[key])" type="default"></display-value></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="debug.times && debug.times.evaluations && (debug.times.evaluations.lastStart || debug.times.evaluations.lastEnd || debug.times.evaluations.lastCancel )" class="card card-settings">
+            <div class="card-header" id="debug-node-evaluations" data-toggle="collapse" data-target="#debug-node-evaluations-collapse" aria-expanded="false" aria-controls="debug-node-evaluations-collapse">
+                <h5 class="mb-0 btn-link">Last evaluations</h5>
+            </div>
+            <div id="debug-node-evaluations-collapse" class="collapse" aria-labelledby="debug-node-evaluations" data-parent="#card-debug">
+                <div class="card-body" style="padding-left: 15px;">
+
+                    <div v-if="debug.times.evaluations.lastStart" class="mb-3">
+                        <p><b><u>Last start</u> <span class="float-right">{{ showTime(debug.times.evaluations.lastStart.date) }}</span></b></p>
+                    </div>
+
+                    <div v-if="debug.times.evaluations.lastEnd" class="mb-3">
+                        <p><b><u>Last end</u> <span class="float-right">{{ showTime(debug.times.evaluations.lastEnd.date) }}</span></b></p>
+                    </div>
+
+                    <div v-if="debug.times.evaluations.lastCancel" class="mb-3">
+                        <p><b><u>Last Cancel</u> <span class="float-right">{{ showTime(debug.times.evaluations.lastCancel.date) }}</span></b></p>
+                        <span>reason: <b>{{ debug.times.evaluations.lastCancel.reason }}</b></span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <div v-if="debug.performances" class="card card-performances">
+            <div class="card-header" id="debug-node-performances" data-toggle="collapse" data-target="#debug-node-performances-collapse" aria-expanded="false" aria-controls="debug-node-performances-collapse">
+                <h5 class="mb-0 btn-link">Performances</h5>
+            </div>
+
+            <div id="debug-node-performances-collapse" class="collapse" aria-labelledby="debug-node-performances" data-parent="#debug-node">
+                <div class="card-body" style="padding-left: 15px;">
+                    <table class="table-desc table-striped">
+                        <thead class="thead-dark">
+                            <th>Stat</th>
+                            <th>Value</th>
+                        </thead>
+                        <tbody>
+                            <tr><td>min</td><td>{{debug.performances.min && debug.performances.min.toFixed(0)}}ms</td></tr>
+                            <tr><td>max</td><td>{{debug.performances.max && debug.performances.max.toFixed(0)}}ms</td></tr>
+                            <tr><td>avg</td><td>{{debug.performances.avg && debug.performances.avg.toFixed(0)}}ms</td></tr>
+                            <tr><td>total</td><td>{{debug.performances.total && debug.performances.total.toFixed(0)}}ms</td></tr>
+                            <tr><td>Nb of runs</td><td>{{debug.performances.nbRuns}}</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal debug-json-modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Value debugger</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="json-editor" style="height: 400px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary btn-save">Save changes</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</template>
+
+<script>
+import _ from 'lodash';
+import moment from 'moment';
+
+import DisplayValueVue from './displayValue.vue';
+
+export default {
+    props: [
+        "n"
+    ],
+    components: {
+        "display-value" : DisplayValueVue,
+    },
+    data: function () {
+        return {
+            "debug": null
+        };
+    },
+    created: function() {
+        this.view = window.dualboxEditor.v;
+        this.debug = this.n.getSnapshot(); // shortcut
+    },
+    mounted: function() {
+
+    },
+    methods: {
+        getSnapshotStatus : function(n) {
+            if( this.n.isSnapshotStatus(0) ) return "IDLE";
+            else if( this.n.isSnapshotStatus(1) ) return "COMPUTING";
+            else if( this.n.isSnapshotStatus(2) ) return "WAITING";
+            else if( this.n.isSnapshotStatus(3) ) return "READY";
+            else throw "Error: unknown status";
+        },
+
+        getInputData: function(key) {
+            return this.debug.data[key];
+        },
+
+        // show number if not null, undefined or 0
+        showNumber: function(n) {
+            return n? n: "";
+        },
+
+        showTime: function(d) {
+            return moment(d).format('HH:mm:ss.SSS');
+        }
+    }
+}
+</script>

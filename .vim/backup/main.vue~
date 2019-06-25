@@ -1,0 +1,1036 @@
+<style>
+    .code-panel {
+        width: 30%;
+        height: 100%;
+        vertical-align: top;
+        float: left;
+    }
+
+    .application-container {
+        width: calc(70% - 5px);
+        height: 100%;
+        display: inline-block;
+        vertical-align: top;
+        float: right;
+    }
+
+    .code-controls, .run-options {
+        width: 100%;
+        height: 60px;
+    }
+
+    .application {
+        width: 100%;
+        height: calc(100% - 60px);
+        background-color: #ccc;
+    }
+
+    .dragbar {
+        height: 100%;
+        width: 5px;
+        background-color: #e7e7e7;
+        display: inline-block;
+        cursor: col-resize;
+    }
+
+    .code-content {
+        position: relative;
+        height: calc(100% - 56px);
+    }
+
+    .code-html-container {
+        position: relative;
+        height: 50%;
+        border-bottom: 1px solid #e7e7e7;
+    }
+
+    .code-css-container {
+        position: relative;
+        height: calc(50% - 1px);
+        overflow: hidden;
+    }
+
+    .code-css {
+        width: 100%;
+        height: 100%;
+    }
+
+    .code-html {
+        height: calc(100% - 40px);
+        width: 100%;
+    }
+
+    .CodeMirror {
+        height: 100%;
+    }
+
+    .code-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        padding: 10px;
+    }
+
+    .btn-light.focus, .btn-light:focus {
+        box-shadow: none!important;
+    }
+
+    .button-bar {
+        width: 60px;
+        padding: 10px;
+        border-bottom: 1px solid #e7e7e7;
+        width: 100%;
+        background-color: white;
+    }
+
+    .noselect {
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+        -o-user-select: none;
+        user-select: none;
+    }
+
+    .btn + .btn {
+        margin-left: 5px;
+    }
+
+    .btn-graph-goto {
+        box-shadow: none!important;
+    }
+
+    .nav-tabs {
+        border-bottom: none;
+    }
+
+    .main-navigation a.nav-link {
+        color: white;
+    }
+
+    .main-navigation a.nav-link.active {
+        color: #212529;
+    }
+
+    .dualbox-editor-body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: rgb(85, 85, 85);
+    }
+
+    .dualbox-graph-left-section {
+        height: 100%;
+        width: 500px;
+        float: left;
+        position: relative;
+        overflow: hidden;
+        margin-left: -465px;
+        transition: margin-left 0.3s ease;
+    }
+
+    .dualbox-graph-left-window {
+        width: calc(100% - 35px);
+        height: calc(100% - 20px);
+        margin-top: 10px;
+        margin-bottom: 30px;
+        /* background-color: #ECF2F8; */
+        background-color: #f8f9fa;
+        border: 1px solid grey;
+        border-radius: 5px;
+        position: relative;
+        float: left;
+    }
+
+    .dualbox-graph-left-panel {
+        width: 100%;
+        height: 100%;
+    }
+
+    .btn-toggle-left-window {
+        position: absolute;
+        right: 0;
+        top: 0;
+        margin-right: -35px;
+        z-index: 100;
+        border-top-left-radius: 0px;
+        border-bottom-left-radius: 0px;
+    }
+
+    .dualbox-graph-right-section {
+        height: 100%;
+        width: 500px;
+        float: right;
+        position: relative;
+        overflow: hidden;
+        margin-right: -465px;
+        transition: margin-right 0.3s ease;
+    }
+
+    .dualbox-graph-right-window {
+        width: calc(100% - 35px);
+        height: calc(100% - 20px);
+        margin-top: 10px;
+        margin-bottom: 30px;
+        /* background-color: #ECF2F8; */
+        background-color: #f8f9fa;
+        border: 1px solid grey;
+        border-radius: 5px;
+        position: relative;
+        float: right;
+    }
+
+    .dualbox-graph-right-panel {
+        width: 100%;
+        height: 100%;
+    }
+
+    .btn-toggle-right-window {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin-left: -35px;
+        z-index: 100;
+        border-top-right-radius: 0px;
+        border-bottom-right-radius: 0px;
+    }
+
+    .dualbox-graph-tab {
+        height: 100%;
+        width: 100%;
+        background-color: #555!important;
+    }
+
+    .dualbox-graph-main {
+        height: 100%;
+        width: calc(100% - 70px);
+        float: right;
+        background-color: #555!important;
+        transition: width 0.3s ease;
+    }
+
+    .dualbox-graph-main.left-panel-expanded {
+        width: calc(100% - 535px);
+        margin-left: -465px;
+    }
+
+    .dualbox-graph-main.right-panel-expanded {
+        width: calc(100% - 535px);
+    }
+
+    .dualbox-graph-main.left-panel-expanded.right-panel-expanded {
+        width: calc(100% - 1000px);
+        margin-left: -465px;
+    }
+
+    .opacity0 {
+        opacity: 0;
+    }
+
+    .btn-editor-xs {
+        width: 18px;
+        padding  : 3px!important;
+        line-height  : .5;
+        border-radius : 2px;
+    }
+
+    .btn-editor-xs > i {
+        font-size  : 10px;
+    }
+
+    .btn-outline-discrete {
+        border-color: rgba(0,0,0,0.05);
+        border-color: transparent;
+        color: rgba(0,0,0,0.3);
+    }
+
+    .dualbox-app-navigation {
+        background-color: transparent;
+        margin-bottom: 0;
+        vertical-align: middle;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        font-weight: bold;
+        user-select: none;
+    }
+
+    .app-topbar {
+        border-bottom: none;
+        padding-left: 15px;
+        padding-right: 15px;
+        display: flex;
+        width: 100%;
+        height: 58px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .dark, .graph-tab.active, .nav-item.active .graph-tab {
+        color: white!important;
+        background-color: #555!important;
+    }
+
+    .light {
+        color: #4d4d4d!important;
+        background-color: #f8f9fa!important;
+    }
+
+    .main-navigation .nav-link, .main-navigation .nav-link.active, .nav-item.active .nav-link {
+        border-bottom: none;
+        border-left: none;
+        border-top: none;
+        border-right: none;
+        position: relative;
+        top: 1px;
+    }
+
+    .btn:focus {
+        outline: none;
+        box-shadow: none;
+    }
+
+    .btn-transparent, .btn-transparent:hover, .btn-transparent:focus {
+        background-color: transparent;
+    }
+
+    .connection-control {
+        position: absolute;
+        height: 14px;
+        width: 14px;
+        background-color: transparent;
+        z-index: 19;
+        cursor: move;
+    }
+
+    .connection-control.selected {
+        border-color: #0066ff;
+        box-shadow: 1px 1px 10px #0066ff;
+    }
+
+    .connection-label {
+        z-index: 22!important;
+        color: #004d00!important;
+        background-color: white!important;
+        padding: 4px 4px;
+        border: 2px solid #004d00;
+        font-size: 16px!important;
+        border-radius: 5px;
+    }
+
+    .input-color-tag {
+        background-color: #F2D600;
+    }
+
+    .output-color-tag {
+        background-color: #FFAB4A;
+    }
+
+    .ui-color-tag {
+        background-color: #61BD4F;
+    }
+
+    .metanode-color-tag {
+        background-color: #DDDDDD;
+    }
+
+    .input {
+    }
+
+    .output {
+    }
+
+
+    .card.jsplumb-connected {
+        /*border: 1px solid #a1a1a1; change border when connected to spot isolated elements as disabled*/
+    }
+
+    .jsplumb-drag {
+        opacity:0.7 !important;
+    }
+
+    path, .jsplumb-endpoint {
+        cursor: pointer;
+    }
+
+    .jsplumb-overlay {
+        background-color:transparent;
+    }
+
+    .fileUpload {
+        position: relative;
+        overflow: hidden;
+        margin: 10px;
+    }
+    .fileUpload input.upload {
+        position: absolute;
+        top: 0;
+        right: 0;
+        margin: 0;
+        padding: 0;
+        font-size: 20px;
+        cursor: pointer;
+        opacity: 0;
+        filter: alpha(opacity=0);
+    }
+
+
+    .module-edit-modal-body .btn+.btn {
+        margin-bottom: 0;
+        margin-left: 5px;
+    }
+
+    .btn-add-node {
+        width:46%;
+        margin:1%;
+    }
+
+    button.close {
+        position: absolute;
+        right: 0;
+        margin-right: 5px!important;
+    }
+
+    .CodeMirror {
+        height: auto;
+        min-height: 300px;
+    }
+
+    .load-app, .save-app {
+        margin-left: 5px;
+        margin-right: 5px;
+    }
+</style>
+
+<template>
+    <div class="dualbox-editor-body">
+        <nav class="main-navigation navbar navbar-default" style="position: relative; margin-bottom: 0px; padding: 0; padding-top: 5px; background-color: #2e6da4;">
+            <ul class="nav nav-tabs">
+                <li class="nav-item active">
+                    <a class="nav-link graph-tab" href="#1" data-toggle="tab">Application Graph</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link interface-tab" href="#2" data-toggle="tab">Interface Editor</a>
+                </li>
+            </ul>
+
+            <div class="nav navbar-right" style="vertical-align: top; margin-top: 5px; margin-right: 10px; margin-bottom: 5px;">
+                <div v-if="showLoadButton === true">
+                    <button class="load-app btn btn-sm btn-light" style="position: relative; bottom: 3px;" v-on:click="loadApp">Load App</button>
+                </div>
+                <div v-if="showSaveButton">
+                    <button class="save-app btn btn-sm btn-light" style="position: relative; bottom: 3px;" v-on:click="saveApp">Save App</button>
+                </div>
+            </div>
+        </nav>
+        <div class="tab-content dualbox-graph-tab" style="width: 100%; height: calc(100% - 46px);">
+            <div class="tab-pane active" id="1" style="width: 100%; height: 100%;">
+                <div class="dualbox-graph-left-section dark">
+                    <div class="dualbox-graph-left-window">
+                        <button class="btn btn-light btn-toggle-left-window" v-on:click="toggleLeftWindow" title="shrink window" data-expanded="false"><i class="fa fa-angle-double-right"></i></button>
+                        <div class="dualbox-graph-left-panel light"></div>
+                    </div>
+                </div>
+                <div class="dualbox-graph-right-section dark">
+                    <div class="dualbox-graph-right-window">
+                        <button class="btn btn-light btn-toggle-right-window" v-on:click="toggleRightWindow" title="shrink window" data-expanded="false"><i class="fa fa-angle-double-left"></i></button>
+                        <div class="dualbox-graph-right-panel light"></div>
+                    </div>
+                </div>
+                <div class="container-fluid dualbox-graph-main" v-on:click="setMainMenu">
+                    <div class="row">
+                        <div class="app-topbar dark">
+                            <div class="justify-content-left">
+                                <div class="dropdown">
+                                    <button class="btn btn-primary dropdown-toggle" type="button" id="add-node-dropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="margin-right: 5px;">
+                                        Add
+                                    </button>
+                                    <div class="dropdown-menu" aria-labelledby="add-node-dropdown">
+                                        <a class="dropdown-item add-box" v-on:click="addBox" href="#">Add box</a>
+                                        <a class="dropdown-item add-metabox" v-on:click="addMetabox" href="#">Add metabox</a>
+                                        <a class="dropdown-item add-input" v-on:click="addInput" href="#">Add input</a>
+                                        <a class="dropdown-item add-output" v-on:click="addOutput" href="#">Add output</a>
+                                        <a class="dropdown-item import-metabox" v-on:click="importMetabox" href="#">Import metabox</a>
+                                    </div>
+                                    <button class="btn btn-light btn-undo" title="undo (ctrl-z)" v-on:click="undo"><i class="fa fa-undo"></i></button>
+                                    <button class="btn btn-light btn-redo" title="redo (ctrl-y)" v-on:click="redo"><i class="fa fa-repeat fa-redo"></i></button>
+                                    <div class="form-check d-inline-block ml-2">
+                                        <label class="form-check-label">
+                                            <input class="form-check-input show-events" type="checkbox" value="false" v-on:click="showEvents">
+                                            <span class="noselect">Show events</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="justify-content-center mx-auto">
+                                <ol class="dualbox-app-navigation breadcrumb"></ol>
+                            </div>
+
+                            <div class="justify-content-right">
+                                <div class="dropdown selection-menu" style="display: none;">
+                                    <button class="btn btn-primary dropdown-toggle" type="button" id="selection-dropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                        Selection
+                                    </button>
+                                    <div class="dropdown-menu dropdown-menu-right" aria-labelledby="add-node-dropdown">
+                                        <a class="dropdown-item dualbox-merge-selection" v-on:click="mergeSelection" href="#">Merge</a>
+                                        <a class="dropdown-item dualbox-remove-selection" v-on:click="removeSelection" href="#" style="color: red;">Delete</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row" style="height: calc(100% - 58px);">
+                        <graph-vue :app="app" ref="graph"></graph-vue>
+
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane" id="2" style="width 100%; height: 100%; background-color: white;">
+                <div class="db-editor-main" style="width: 100%; height: 100%; overflow: hidden;">
+                    <div class="code-panel">
+                        <div class="button-bar form-inline code-controls" style="position: relative;">
+                            <button class="btn btn-primary btn-save-interface-element" v-on:click="saveInterfaceElement">Save changes</button>
+                        </div>
+                        <div class="code-content">
+                            <div class="code-html-container">
+                                <div style="padding-top: 5px; padding-bottom: 5px; height: 50px; position: relative;">
+                                    <h3 style="position: absolute; top: 0; margin: 5px; font-size: 16px; z-index: 100; display: inline-block; margin-top: 5px;">HTML</h3>
+                                    <div class="d-inline-block ml-auto form-inline mr-2 mt-2" style="position: absolute; top: 0; right: 0;">
+                                        <button class="btn btn-success btn-sm btn-add-interface" v-on:click="addInterface"><i class="fas fa-plus"></i></button>
+                                        <select class="form-control btn-sm app-interface-select" v-on:change="selectInterface" style="width: 150px; height: 32px;">
+                                            <option>Load UI...</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-light btn-edit-panel-description" v-on:click="editPanelDescription"><i class="fas fa-info" style="padding-left: 8px; padding-right: 8px;"></i></button>
+                                        <button class="btn btn-danger btn-sm btn-remove-interface" v-on:click="removeInterface"><i class="fas fa-minus"></i></button>
+                                    </div>
+                                </div>
+                                <div class="code-html-text-container" style="position: relative; height: calc(100% - 50px);">
+                                    <textarea class="code-html"></textarea>
+                                </div>
+                            </div>
+                            <div class="code-css-container">
+                                <div style="height: 30px;">
+                                    <h3 style="position: absolute; top: 0; margin: 5px; font-size: 16px; z-index: 100;">CSS</h3>
+                                </div>
+                                <div class="colde-css-text-container" style="position: relative; height: calc(100% - 30px);">
+                                    <textarea class="code-css" v-model="appCss"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dragbar"></div>
+                    <div class="application-container">
+                        <div class="button-bar form-inline run-options" style="position: relative;">
+                            <button class="btn btn-success btn-run mr-2" v-on:click="runApp">Run</button>
+
+                            <select class="form-control run-loglevel mr-1 ml-2">
+                                <option>error</option>
+                                <option>warn</option>
+                                <option>info</option>
+                                <option>log</option>
+                                <option>debug</option>
+                            </select>
+
+                            <input class="form-control run-noversioncheck mr-1 ml-3" type="checkbox" checked>No version checking</input>
+                            <input class="form-control run-removetrycatch mr-1 ml-3" type="checkbox">Remove Try/catch</input>
+                            <input class="form-control run-makesynchrone mr-1 ml-3" type="checkbox">Make Synchrone</input>
+
+                            <div class="ml-auto">
+                                <input class="form-control run-profiler mr-1 ml-3" type="checkbox">Profiler</input>
+                                <input class="form-control run-record mr-1 ml-3" type="checkbox">Record</input>
+                                <button class="btn btn-secondary btn-snapshot" v-on:click="takeAndLoadSnapshot">Snapshot</button>
+                            </div>
+                        </div>
+                        <div class="application capture-left-click capture-right-click"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+import swal from 'sweetalert2';
+import CodeMirror from '../../libs/CodeMirror.js';
+import graphVue from './graph.vue';
+
+var view = window.graphView;
+
+export default {
+    props: [
+        'app', // the app
+
+        // Display configuration (online or offline ?)
+        'showLoadButton',
+        'showSaveButton',
+        'saveButtonFunction',
+
+        // modes
+        'eventVisibility' // are events visible
+    ],
+    components: {
+        'graph-vue': graphVue
+    },
+    data () {
+        return {
+            renderIndex: 0,
+
+            // the specific app css
+            appCss: "",
+        }
+    },
+    created: function() {
+        this.view = view;
+        // TODO: restore this when all menus are migrated to Vue.js
+
+        this.getOptions = () => {
+            return {
+                profiler : $(this.$el).find('.run-profiler').is(':checked'),
+                logLevel : $(this.$el).find('.run-loglevel').val(),
+                options : {
+                    noVersionCheck: $(this.$el).find('.run-noversioncheck').is(':checked'),
+                    debug: {
+                        removeTryCatch: $(this.$el).find('.run-removetrycatch').is(':checked'),
+                        makeSynchrone: $(this.$el).find('.run-makesynchrone').is(':checked'),
+                        record: $(this.$el).find('.run-record').is(':checked'),
+                    }
+                }
+            }
+        }
+    },
+    updated: function() {
+        //console.log('updating main view with: ' + JSON.stringify(this.app));
+        this.appCss = (this.app && this.app.css) || "";
+    },
+    mounted: function() {
+        //this.view.setMainMenu();
+
+        $(this.$el).bind('expandSettings', function(e) {
+            // expand
+            $(this).find('.dualbox-graph-left-section').css('margin-left', '0');
+            $(this).find('.dualbox-graph-main').addClass('left-panel-expanded');
+            $(this).find('.btn-toggle-left-window').data('expanded', true).find('i')
+                .removeClass('fa-angle-double-right')
+                .addClass('fa-angle-double-left')
+                .attr('title', 'shrink window');
+        });
+
+        $(this.$el).bind('shrinkSettings', function(e) {
+            // shrink
+            $(this).find('.dualbox-graph-left-section').css('margin-left', '-465px');
+            $(this).find('.dualbox-graph-main').removeClass('left-panel-expanded');
+            $(this).find('.btn-toggle-left-window').data('expanded', false).find('i')
+                .removeClass('fa-angle-double-left')
+                .addClass('fa-angle-double-right')
+                .attr('title', 'expand window');
+        });
+
+        $(this.$el).bind('expandDebug', function(e) {
+            // expand
+            $(this).find('.dualbox-graph-right-section').css('margin-right', '0');
+            $(this).find('.dualbox-graph-main').addClass('right-panel-expanded');
+            $(this).find('.btn-toggle-right-window').data('expanded', true).find('i')
+                .removeClass('fa-angle-double-left')
+                .addClass('fa-angle-double-right')
+                .attr('title', 'shrink window');
+        });
+
+        $(this.$el).bind('shrinkDebug', function(e) {
+            // shrink
+            $(this).find('.dualbox-graph-right-section').css('margin-right', '-465px');
+            $(this).find('.dualbox-graph-main').removeClass('right-panel-expanded');
+            $(this).find('.btn-toggle-right-window').data('expanded', false).find('i')
+                .removeClass('fa-angle-double-right')
+                .addClass('fa-angle-double-left')
+                .attr('title', 'expand window');
+        });
+
+        // bind tabs
+        var self = this;
+        $(this.$el).find("a[data-toggle='tab']").on("shown.bs.tab", function(e) {
+            var target = $(e.target).attr("href") // activated tab
+            if( target == "#1" ) {
+                self.view.killApp();
+            }
+            else if( target == "#2" ) {
+                self.view.htmlCode.refresh();
+                self.view.cssCode.refresh();
+                self.view.runApp( self.getOptions() );
+            }
+        });
+
+        // instanciate codemirror for html and css
+        if( !self.view.htmlCode ) {
+            self.view.htmlCode = CodeMirror.fromTextArea( $(self.$el).find(".code-html")[0], {
+                lineNumbers: true,
+                mode : "htmlmixed",
+                lineWrapping: true
+            });
+        }
+        if( !self.view.cssCode ) {
+            self.view.cssCode = CodeMirror.fromTextArea( $(self.$el).find(".code-css")[0], {
+                lineNumbers: true,
+                mode : "css",
+                lineWrapping: true
+            });
+        }
+
+        // Resize horizontally
+        $(this.$el).find('.dragbar').mousedown(function(e){
+            e.preventDefault();
+            $(document).mouseup(function(e){
+                $(document).unbind('mousemove');
+            });
+            $(document).mousemove(function(e){
+                $('.code-panel').css('width', e.pageX + "px");
+                $('.application-container').css('width', ($(".db-editor-main").width() - e.pageX - 5) + "px");
+            })
+        });
+
+    },
+    methods: {
+        "loadApp" : function() {
+            var self = this;
+
+            // create a fake input and click it to select a file
+            var input = $('<input/>', { "type": "file", "class": "upload", "accept" : ".json" });
+            input.change( function(e) {
+                // if we're not here, go to 1st tab
+                $("a[data-toggle='tab'][href='#1']").click();
+
+                // parse the file JSON and load it
+                var files = e.target.files; // FileList object
+                var r = new FileReader();
+                r.onload = function(e) {
+                    var contents = e.target.result;
+                    var json = JSON.parse(contents);
+                    self.view.e.setApp(json);
+                };
+
+                r.readAsText(files[0]);
+            });
+            input.click();
+        },
+        "saveApp": function() {
+            // bind the app load
+            if( this.saveButtonFunction ) {
+                var saveButtonFunction = function(e) {
+                    var json = view.m.getCleanJson();
+                    return this.saveButtonFunction(json);
+                }
+            }
+            else {
+                var saveButtonFunction = function(e) {
+                    var app = view.m.getCleanJson();
+                    var text = JSON.stringify(app, null, 2);
+                    var blob = new Blob([text], { "type" : "application/octet-stream" });
+
+                    var a = document.createElement('a');
+                    a.href = window.URL.createObjectURL(blob);
+                    a.download = "app.json";
+
+                    // simulate a click on the link
+                    if (document.createEvent) {
+                        var event = document.createEvent("MouseEvents");
+                        event.initEvent("click", true, true);
+                        a.dispatchEvent(event);
+                    } else {
+                        a.click();
+                    }
+                }
+            }
+            saveButtonFunction();
+        },
+        "addBox" : function(e) {
+            $('#add-node-modal').modal();
+        },
+        "addMetabox" : function(e) {
+            var self = this;
+            e.preventDefault();
+            e.stopPropagation();
+
+            swal({
+                input: 'text',
+                title: 'Choose a name for the metabox',
+            }).then(function(result) {
+                if( result.value ) {
+                    self.e.c.addNewMetabox(result.value);
+                }
+            });
+        },
+        "addInput" : function(e) {
+            this.view.c.createInput();
+        },
+        "addOutput": function(e) {
+            this.view.c.createOutput();
+        },
+        "importMetabox": async function(e) {
+            var self = this;
+
+            const { value: file } = await swal({
+                title: 'Select your metabox file',
+                input: 'file',
+                inputAttributes: {
+                    'accept': 'application/json',
+                    'aria-label': 'Select your metabox file'
+                }
+            })
+
+            if (file) {
+                const reader = new FileReader()
+                reader.onload = (e) => {
+                    var json = JSON.parse(e.target.result);
+
+                    self.view.e.loadPackages(json).then(async () => {
+                        const { value: name } = await swal({
+                            title: 'Choose a name for your metabox',
+                            input: 'text',
+                            showCancelButton: true,
+                            inputValidator: (value) => {
+                              return !value && 'You need to write something!'
+                            }
+                        });
+
+                        self.view.c.addNewMetabox(name, json);
+                    }).catch((err) => {
+                        console.error(err);
+                    });
+                }
+                reader.readAsText(file)
+            }
+        },
+
+        "selectInterface": function(e) {
+            // Load the interface HTML when selected
+            var uiName = $(e.target).val();
+            if( uiName !== "" && uiName !== "Load UI..." ) {
+                var itf = this.view.m.data.root.interface;
+                var htmlString = htmltool.json2html(itf[uiName]);
+                var prettyString = htmltool.htmlPrettyPrint(htmlString);
+                this.view.htmlCode.setValue(prettyString);
+            }
+            else {
+                this.view.htmlCode.setValue("");
+            }
+        },
+        "saveInterfaceElement": function(e) {
+            var currentInterface = $(this.$el).find('.app-interface-select').val();
+            if( currentInterface !== "" ) {
+                var currentHTML = this.view.htmlCode.getValue();
+
+                // save html code into app
+                this.view.m.data.root.interface[currentInterface] = htmltool.html2json(currentHTML);
+            }
+
+            // save css code into app
+            this.view.m.data.root.css = this.view.cssCode.getValue();
+        },
+        "addInterface": function(e) {
+            var self = this;
+
+            swal.mixin({
+                confirmButtonText: 'Next &rarr;',
+                showCancelButton: true,
+                progressSteps: ['1', '2', '3']
+            }).queue([
+                {
+                    input: 'text',
+                    title: 'Choose a name',
+                    text: 'Enter a name for the new interface'
+                },
+                {
+                    input: 'select',
+                    title: 'Choose the type',
+                    text : 'Is it a viewer panel or a control panel?',
+                    inputOptions: {
+                      'control': 'A control panel',
+                      'viewer': 'A viewer',
+                    },
+                },
+                {
+                    input: 'select',
+                    title: 'Choose the position',
+                    text : 'Where do you want to position your panel?',
+                    inputOptions: {
+                      'top-left': 'At the top-left',
+                      'top-center': 'At the top-center',
+                      'top-right': 'At the top-right',
+                      'center-left': 'At the center-left',
+                      'center': 'At the center',
+                      'center-right': 'At the center-right',
+                      'bottom-left': 'At the bottom-left',
+                      'bottom-center': 'At the bottom-center',
+                      'bottom-right': 'At the bottom-right',
+                      'whole-screen': 'I want my panel in full-screen',
+                    },
+                }
+            ]).then((result) => {
+                if (result.value) {
+                    var name = result.value[0];
+                    var type = result.value[1];
+                    var position = result.value[2];
+
+                    if (name === "") {
+                        swal.showInputError("the name is empty!");
+                        return false
+                    }
+
+                    var appInterface = self.view.m.data.root.interface;
+                    if( appInterface[name] ) {
+                      swal.showInputError("Interface " + name + " already exists!");
+                      return false
+                    }
+                    else {
+                        var style={};
+                        switch(position) {
+                        case 'top-left':      style={ 'position': 'absolute', 'top': 0, 'left': 0, 'margin': '15px' }; break;
+                        case 'top-center':    style={ 'position': 'absolute', 'top': 0, 'margin': '15px auto' }; break;
+                        case 'top-right':     style={ 'position': 'absolute', 'top': 0, 'right': 0, 'margin': '15px' }; break;
+                        case 'center-left':   style={ 'position': 'absolute', 'top': 0, 'bottom': 0, 'left': 0, 'margin': 'auto 15px' }; break;
+                        case 'center':        style={ 'position': 'absolute', 'top': 0, 'bottom': 0, 'left': 0, 'right': 0, 'margin': 'auto' }; break;
+                        case 'center-right':  style={ 'position': 'absolute', 'top': 0, 'bottom': 0, 'right': 0, 'margin': 'auto 15px' }; break;
+                        case 'bottom-left':   style={ 'position': 'absolute', 'bottom': 0, 'left': 0, 'margin': '15px' }; break;
+                        case 'bottom-center': style={ 'position': 'absolute', 'bottom': 0, 'left': 0, 'right': 0, 'margin': '15px auto' }; break;
+                        case 'bottom-right':  style={ 'position': 'absolute', 'bottom': 0, 'right': 0, 'margin': '15px' }; break;
+                        case 'whole-screen':  style={ 'position': 'absolute', 'top': 0, 'left': 0 }; break;
+                        }
+
+                        // some prefilled data
+                        style['width'] = "300px";
+                        style['padding'] = "15px";
+                        style['border'] = "1px solid #ccc";
+                        style['border-radius'] = "4px";
+                        style['background'] = "white";
+                        if( position.startsWith("center") ) {
+                            style['height'] = "60px"; // must define height
+                        }
+                        else {
+                            style['height'] = "auto";
+                        }
+
+                        // add a basic control
+                        appInterface[name] = {
+                            type: "Element",
+                            tagName: "div",
+                            attributes: {
+                                className: [
+                                  "dualbox",
+                                  "dualbox-container",
+                                  "dualbox-container-" + name,
+                                  type=="viewer" ? "dualbox-viewer" : "dualbox-controls"
+                                ],
+                                style: style,
+                            },
+                            children: []
+                        }
+
+                        // add the value to our select, and load it
+                        div.find(".app-interface-select").append(
+                            $("<option/>", { "value" : name }).append(name)
+                        );
+                        $(document).ready(function() {
+                            div.find('.app-interface-select').val(name).change();
+                        });
+
+                        self.view.runApp( getOptions() );
+                    }
+                }
+            })
+        },
+        "removeInterface": function(e) {
+            var self = this;
+            var name = $('.app-interface-select').val();
+
+            swal({
+                title: "Confirm deleting " + name + " ?",
+                type: "warning",
+                showCancelButton: true,
+                confirmButtonColor: "#DD6B55",
+                confirmButtonText: "Yes, delete it!",
+                closeOnConfirm: true,
+                closeOnCancel: true
+            }).then((result) => {
+                if( result.value ) {
+                    // set the interface back to first value
+                    div.find(".app-interface-select option[value='" + name + "']").remove();
+                    div.find(".app-interface-select").change();
+                    delete self.view.m.data.root.interface[name];
+                    self.view.htmlCode.setValue("");
+                    self.view.runApp( getOptions() );
+                }
+            });
+        },
+        "editPanelDescription": function(e) {
+            var name = $('.app-interface-select').val();
+
+            swal({
+                title: "Enter a description for this panel!",
+                input: "textarea",
+                inputValue: view.m.data.root.interface[name].description || "",
+                showCancelButton: true,
+                closeOnConfirm: false,
+                showLoaderOnConfirm: true,
+                animation: "slide-from-top",
+                inputPlaceholder: "Write something"
+            }).then( (result) => {
+                if (result.value === "") {
+                  swal.showInputError("You need to write something!");
+                  return false
+                }
+                else {
+                    view.m.data.root.interface[name].description = result.value;
+                }
+            });
+        },
+        "toggleLeftWindow": function(e) {
+            var expanded = $(e.target).closest('button').data('expanded');
+            if( expanded ) {
+                $(this.$el).trigger('shrinkSettings');
+            }
+            else {
+                $(this.$el).trigger('expandSettings');
+            }
+        },
+        "toggleRightWindow": function(e) {
+            var expanded = $(e.target).closest('button').data('expanded');
+            if( expanded ) {
+                $(this.$el).trigger('shrinkDebug');
+            }
+            else {
+                $(this.$el).trigger('expandDebug');
+            }
+        },
+
+        "showEvents": function(e) {
+            this.view.setEventsVisibility( $(e.target).is(':checked') );
+        },
+
+        "runApp": function(e) {
+            this.view.runApp( this.getOptions() );
+        },
+
+        "takeAndLoadSnapshot": function(e) {
+            this.view.takeAndLoadSnapshot();
+        },
+
+        "undo": function(e) {
+            this.view.c.undo();
+        },
+
+        "redo" : function(e) {
+            this.view.c.redo();
+        },
+
+        "removeSelection": function(e) {
+            this.view.c.deleteSelection();
+        },
+
+        "mergeSelection": function(e) {
+            this.view.c.mergeSelection();
+        },
+
+        "setMainMenu": function(e) {
+            this.view.setMainMenu();
+        },
+    }
+}
+</script>

@@ -1,0 +1,371 @@
+/**
+ *   Implementing the View of the GraphEditor
+ *   Everything related to display should be here
+ */
+
+import _ from 'lodash';
+import swal from 'sweetalert2';
+
+// Manage the start/stop lifetime of the application
+import AppManager from './AppManager';
+
+// for instanciation and adding templates to DOM
+import TemplateManager from './TemplateManager';
+
+// Tools for the graph
+
+import Utils from './Utils';
+import dbUtils from '../m/DualboxUtils';
+
+// The different views templates (vue.js)
+import mainVue from './templates/main.vue';
+
+class GraphView {
+    constructor(editor, div, attrs) {
+        this.e = editor;
+        this.m = editor.m;
+        this.c = editor.c;
+
+        this.utils = Utils;
+
+        this.div = $(div);
+        this.canvas = null;
+        this.attrs = attrs;
+
+        // Manage the different HTML templates
+        this.templateMgr = new TemplateManager(this);
+        this.mainVue = null;
+
+        // Controls for different views
+        this.showEvents = false;
+
+        // Application manager
+        this.appManager = null;
+
+        // Code mirror boxes
+        this.htmlCode = null;
+        this.cssCode = null;
+
+        window.graphView = this;
+
+        // load the main template
+        this.initialized = false;
+        this.initializing = false;
+        this.initialize();
+    }
+
+    hideCanvas() {
+        this.mainVue.$refs.graph.setLoading(true);
+        return new Promise((resolve) => {
+            this.mainVue.$nextTick(resolve);
+        });
+    }
+
+    showCanvas() {
+        this.mainVue.$refs.graph.setLoading(false);
+        return new Promise( (resolve) => {
+            this.mainVue.$nextTick(resolve);
+        });
+    }
+
+    onReady(cb) {
+        if( this.initialized ) {
+            if(cb) cb();
+        }
+        else {
+            setTimeout(() => {
+                this.onReady(cb);
+            }, 100);
+        }
+    }
+
+    initialize() {
+        if( !this.initializing && !this.initialized ) {
+            this.initializing = true;
+
+            var templates = { "main": false, "addNode" : false };
+            var templateInitialized = (name) => {
+                if( templates[name] == false ) templates[name] = true;
+
+                var allInitialized = true;
+                _.each(templates, (initialized, name) => {
+                    if( !initialized ) {
+                        allInitialized = false;
+                    }
+                });
+
+                if( allInitialized ) {
+                    this.initializing = false;
+                    this.initialized = true;
+                }
+            }
+
+            // add main template
+            this.div.append($('<div/>', { 'id' : 'mainvue' })); // add a target
+            this.div.ready(() => {
+                var MainVue = Vue.extend( mainVue ); // create a class from our .vue template
+                this.mainVue = new MainVue({
+                    el: "#mainvue",
+                    propsData: {
+                        // Display configuration
+                        showLoadButton: this.attrs.showLoadButton,
+                        showSaveButton: this.attrs.showSaveButton,
+                        saveButtonFunction: this.attrs.saveButtonFunction,
+
+                        // Event Visibility
+                        eventVisibility: false,
+
+                        // Variable pointers
+                        app: _.cloneDeep(this.m.getCurrentMetanode()), // dont reactively update
+                    },
+                    mounted: () => {
+                        //this.initializeListeners();
+                        this.setNavigation();
+                        this.appManager = new AppManager(this, this.div.find('.application') );
+
+                        templateInitialized("main");
+                    }
+                });
+            });
+
+
+            this.templateMgr.appendVue(this.div, "addNodeVue", {}, () => {
+                templateInitialized("addNode");
+            }); // "add node" modal
+        }
+    }
+
+    async repaint() {
+        // hide the canvas, reset the navigation
+        //await this.hideCanvas();
+        await this.setNavigation();
+
+        // reactively update main view
+        var app = _.cloneDeep(this.m.getCurrentMetanode()); // create a new object to avoid reference comparison
+        Vue.set(this.mainVue, 'app', app);
+        await this.mainVue.$nextTick(); // wait for DOM update
+
+        // show the canvas again
+        //await this.showCanvas();
+    }
+
+    setEventsVisibility( b ) {
+        this.showEvents = b;
+        this.repaint();
+    }
+
+    // set some transparency to show event better
+    setEventMode(b) {
+        if( b ) {
+            // add opacity to non-events
+            $(this.canvas).find('.card:not(.card-ui)').addClass('transparent');
+            $(this.canvas).find('.data-connection').each(function() {
+                if( $(this).is('svg') ) {
+                    // addclass doesnt work with svg
+                    $(this).attr('class', $(this).attr('class') + " transparent");
+                }
+                else {
+                    $(this).addClass('transparent');;
+                }
+            });
+        }
+        else {
+            // add opacity to non-events
+            $(this.canvas).find('.card:not(.card-ui)').removeClass('transparent');
+            $(this.canvas).find('.data-connection').removeClass('transparent');;
+        }
+
+        return new Promise((resolve) => {
+            $(this.canvas).ready(resolve);
+        });
+    }
+
+
+    // set the navigation breadcrumb into the canvas
+    setNavigation() {
+        var appNav = this.div.find('.dualbox-app-navigation');
+        var container = appNav.parent();
+        appNav.remove();
+
+        var crumb = $('<ol/>', { class: 'breadcrumb dualbox-app-navigation'});
+        _.each(this.m.getWindows(), (w, index, array) => {
+            if( index === array.length - 1 ) {
+                // last element, don't make it a link
+                var li = $('<li/>', { class:"breadcrumb-item" }).append(w[0])
+                if( index !== 0 ) {
+                    // we're in a metanode, add a download button
+                    var downloadButton = $('<button class="btn btn-editor-xs btn-secondary btn-download-metanode ml-2">' +
+                        '<i class="fa fa-download"></i></button>');
+                    downloadButton.click((e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        var app = this.m.getCurrentMetanode();
+                        var text = JSON.stringify(app, null, 2);
+                        var blob = new Blob([text], { "type" : "application/octet-stream" });
+
+                        var a = document.createElement('a');
+                        a.href = window.URL.createObjectURL(blob);
+                        a.download = this.m.getCurrentMetanodeName() + ".json";
+
+                        // simulate a click on the link
+                        if (document.createEvent) {
+                            var event = document.createEvent("MouseEvents");
+                            event.initEvent("click", true, true);
+                            a.dispatchEvent(event);
+                        } else {
+                            a.click();
+                        }
+                    });
+                    li.append(downloadButton)
+                }
+
+                crumb.append(li);
+            }
+            else {
+                // append a link to this metabox
+                var link = $('<a/>', { href: '#', class:"text-light" }).append(w[0]);
+                link.click((e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.c.setWindow(w);
+                });
+                crumb.append($('<li/>', { class:"breadcrumb-item" }).append(link));
+            }
+        });
+        container.append(crumb);
+        return new Promise((resolve) => { container.ready(resolve) });
+    }
+
+    isLeftMenuExpanded() {
+        return this.div.find('.btn-toggle-left-window').data('expanded')
+    }
+
+    isRightMenuExpanded() {
+        return this.div.find('.btn-toggle-right-window').data('expanded')
+    }
+
+    openBoxSettings(id) {
+        var expandSettings = () => {
+            this.div.find('.dualbox-editor-body').trigger('expandSettings');
+        };
+
+        if( id ) {
+            this.setBoxMenu(id, expandSettings);
+        }
+        else {
+            this.setMainMenu(expandSettings);
+        }
+    }
+
+    openDebug(id) {
+        var expandDebug = () => {
+            this.div.find('.dualbox-editor-body').trigger('expandDebug');
+        };
+
+        this.setDebugMenu(id, expandDebug);
+    }
+
+    setBoxMenu(id, cb) {
+        var targetDiv = this.div.find('.dualbox-graph-left-panel');
+        var expanded = this.getLeftMenuTarget();
+        targetDiv.html('');
+        this.templateMgr.appendVue(targetDiv, "editNodeSettingsVue", { id : id }, () => {
+            this.setLeftMenuTarget(expanded);
+            if(cb) cb();
+        });
+    }
+
+    setMainMenu(cb) {
+        var targetDiv = this.div.find('.dualbox-graph-left-panel');
+        var expanded = this.getLeftMenuTarget();
+        targetDiv.html('');
+        this.templateMgr.appendVue(targetDiv, "editMainSettingsVue", { app : this.m.getCurrentApp(true) }, () => {
+            this.setLeftMenuTarget(expanded);
+            if(cb) cb();
+        });
+    }
+
+    setDebugMenu(id, cb) {
+        var targetDiv = this.div.find('.dualbox-graph-right-panel');
+        var expanded = this.getRightMenuTarget();
+        targetDiv.html('');
+        this.templateMgr.appendVue(targetDiv, "debugNodeInfosVue", { m : this.m, snapshot : this.m.get(), node: this.m.getNode(id) }, () => {
+            this.setRightMenuTarget(expanded);
+            if(cb) cb();
+        });
+    }
+
+    // save the actual position of where we are in the menu
+    getLeftMenuTarget() {
+        var expanded = [];
+        var panel = this.div.find('.dualbox-graph-left-panel');
+        panel.find('div[aria-expanded="true"]').each(function() {
+            expanded.push($(this).attr('id'));
+        });
+        return expanded;
+    }
+
+    // restore where we were before in the menu
+    setLeftMenuTarget(expanded) {
+        var panel = this.div.find('.dualbox-graph-left-panel');
+        var divs = panel.find('div[data-toggle="collapse"]').each(function() {
+            if( expanded.indexOf( $(this).attr('id') ) !== -1 ) {
+                // this menu was open, restore it
+                var dataTarget = $(this).attr('data-target');
+                $(dataTarget).collapse('show');
+            }
+        });
+    }
+
+    // save the actual position of where we are in the menu
+    getRightMenuTarget() {
+        var expanded = [];
+        var panel = this.div.find('.dualbox-graph-right-panel');
+        panel.find('div[aria-expanded="true"]').each(function() {
+            expanded.push($(this).attr('id'));
+        });
+        return expanded;
+    }
+
+    // restore where we were before in the menu
+    setRightMenuTarget(expanded) {
+        var panel = this.div.find('.dualbox-graph-right-panel');
+        var divs = panel.find('div[data-toggle="collapse"]').each(function() {
+            if( expanded.indexOf( $(this).attr('id') ) !== -1 ) {
+                // this menu was open, restore it
+                var dataTarget = $(this).attr('data-target');
+                $(dataTarget).collapse('show');
+            }
+        });
+    }
+
+    // reinitialize the view
+    reset() {
+        this.jsPlumbInstance.reset();
+        this.jsPlumbInstance = jsPlumb.getInstance({
+            DragOptions: { cursor: 'pointer', zIndex: 2500 }, // default drag options
+            Container: "dualbox-graph-canvas"
+        });
+        this.canvas.empty();
+        ContextMenu.clean();
+    }
+
+    runApp(options) {
+        var json = this.m.getEditorCompatibleJson();
+        this.appManager.run(json, options);
+    }
+
+    takeAndLoadSnapshot() {
+        var json = this.appManager.getSnapshot();
+        // if we're not on the 1st tab, go there
+        this.div.find("a[data-toggle='tab'][href='#1']").click();
+        this.e.setApp(json);
+    }
+
+    killApp() {
+        this.appManager && this.appManager.kill();
+    }
+}
+
+export default GraphView;

@@ -1,0 +1,9 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhist_cnt =7
+let g:netrw_dirhist_1='/home/seb/dev/dualbox/editor'
+let g:netrw_dirhist_2='/home/seb/dev/dualbox/editor/js'
+let g:netrw_dirhist_3='/home/seb/dev/dualbox/editor/js/dist'
+let g:netrw_dirhist_4='/home/seb/dev/dualbox/dualbox_ui/widget3d-slider'
+let g:netrw_dirhist_5='/home/seb/dev/dualbox/dualbox_ui/widget3d-slider/src'
+let g:netrw_dirhist_6='/home/seb/dev/dualbox-scientifeet/dualbox_modules'
+let g:netrw_dirhist_7='/home/seb/dev/dualbox-scientifeet/dualbox_modules/scientifeet-set-footscan-above-zero'

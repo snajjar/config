@@ -1,0 +1,83 @@
+const _ = require('lodash');
+const Dualbox = require('@dualbox/dualbox');
+
+var name = "json";
+
+class JSONObject {
+    constructor(json) {
+        this.____json = json;
+        this.____objectType = "JSON";
+
+        return new Proxy(this, {
+            get(obj, key) {
+                if( key in obj ) {
+                    return obj[key];
+                }
+                else {
+                    return obj.____json[key];
+                }
+            },
+
+            set(obj, key, value, proxy) {
+                if( key in obj ) {
+                    if( obj.hasOwnProperty(key) ) {
+                        obj[key] = value;
+                    }
+                }
+                else {
+                    obj.____json[key] = value;
+                }
+            },
+        });
+    }
+
+    get() {
+        return this.____json;
+    }
+
+    set(json) {
+        this.____json = json;
+    }
+
+    toJSON() {
+        return {
+            metadata: {
+                type: name
+            },
+            data: _.cloneDeep(this.get())
+        }
+    }
+
+    static fromJSON(json) {
+        var json = _.cloneDeep(json);
+        return new JSONObject(json.data);
+    }
+
+    toString() {
+        return "[JSONObject(" + JSON.stringify(this.____json) + ")]";
+    }
+
+    get [Symbol.toStringTag]() {
+        return "JSONObject";
+    }
+
+    clone() {
+        return new JSONObject( _.cloneDeep(this.____json) );
+    }
+}
+
+Dualbox.registerType({
+    name: name,
+    jsClass: JSONObject,
+    native: true,
+    desc: "This type defines a JSON object.",
+    matchData:function(o){
+        return o && o.____objectType == "JSON" && o instanceof JSONObject;
+    },
+    matchJSON:function(json){
+        return json && json.metadata && json.metadata.type.toLowerCase() == "json";
+    }
+});
+
+module.exports = JSONObject;
+

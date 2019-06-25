@@ -1,0 +1,85 @@
+import { $, env, UIComponent } from '@dualbox/dualbox';
+var pkgDesc = require('../../package.json');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap'); // for bundle compilation
+    require('./BootstrapLoader.css'); // for bundle compilation
+}
+
+class BootstrapLoader extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+
+        this.attr = appDesc.attr || {};
+        this.defaultText = null;
+
+        if( env.browser && !env.worker ) {
+            this.spinnerMsg = window && window.DualBox && window.DualBox.spinnerMsg ?
+            window.DualBox.spinnerMsg :
+            "<i class='fa fa-spinner fa-spin'></i>&nbsp; ";
+        }
+    }
+
+    registerEvents() {
+        super.registerEvents();
+
+        // register some custom behaviors
+        this.registerUIEvent("hide", this.hide.bind(this));
+        this.registerUIEvent("show", this.show.bind(this));
+    }
+
+    onReady() {
+    }
+
+    hide() {
+        $(this.div).hide();
+    }
+
+    show( data ) {
+        // if the event define a loader text, set it
+        if( data.args ) {
+            $(this.div).find('.dualbox-load-label').html(this.spinnerMsg + data.args);
+        }
+        else {
+            $(this.div).find('.dualbox-load-label').html(this.spinnerMsg + this.defaultText);
+        }
+        $(this.div).show();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        appDesc.attr = appDesc.attr || {};
+        // build slider from package.json desc
+        var loader = new BootstrapLoader(pkgDesc, appDesc, attrs);
+
+        // get default loader text
+        var loaderText = (loader.attr.text) || "Loading...";
+        var loaderClass = (loader.attr.class) || "loader-default";
+        loader.defaultText = loaderText;
+        loader.loadId = Math.floor( Math.random() * 1000000 );
+
+        var opacity = loader.attr.opacity ? "opacity: " + loader.attr.opacity + ";" : "";
+
+        loader.div = $('<div/>', {
+            class: 'dualbox-bootstrap-loader ' + loader.loadId,
+            style: 'position:relative; width:100%; height:100%;' +
+                   'vertical-align:middle; min-width:300px; min-height:200px;' + opacity
+        }).append(
+            $('<div/>', {
+                class: 'dualbox-load-center-div ' + loader.loadId,
+                style:
+                    'width:300px; height:100px; margin:auto; position:absolute;' +
+                    'top:0px; bottom:0px; left:0px; right:0px; margin:auto;'
+            }).append(
+                $('<p/>', { class: 'dualbox-load-label ' + loader.loadId, style: "color: #666; text-align: center;" }).append(
+                    loader.spinnerMsg + loaderText
+                )
+            )
+        )
+
+        // append to param div and return the slider
+        $(div).append(loader.div);
+        return loader;
+    }
+}
+
+module.exports = BootstrapLoader;

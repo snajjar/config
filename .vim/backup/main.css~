@@ -1,0 +1,480 @@
+.code-panel {
+    width: 30%;
+    height: 100%;
+    vertical-align: top;
+    float: left;
+}
+
+.application-container {
+    width: calc(70% - 5px);
+    height: 100%;
+    display: inline-block;
+    vertical-align: top;
+    float: right;
+}
+
+.code-controls, .run-options {
+    width: 100%;
+    height: 60px;
+}
+
+.application {
+    width: 100%;
+    height: calc(100% - 60px);
+    background-color: #ccc;
+}
+
+.dragbar {
+    height: 100%;
+    width: 5px;
+    background-color: #e7e7e7;
+    display: inline-block;
+    cursor: col-resize;
+}
+
+.code-content {
+    position: relative;
+    height: calc(100% - 56px);
+}
+
+.code-html-container {
+    position: relative;
+    height: 50%;
+    border-bottom: 1px solid #e7e7e7;
+}
+
+.code-css-container {
+    position: relative;
+    height: calc(50% - 1px);
+    overflow: hidden;
+}
+
+.code-css {
+    width: 100%;
+    height: 100%;
+}
+
+.code-html {
+    height: calc(100% - 40px);
+    width: 100%;
+}
+
+.CodeMirror {
+    height: 100%;
+}
+
+.code-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 10px;
+}
+
+.btn-light.focus, .btn-light:focus {
+    box-shadow: none!important;
+}
+
+.button-bar {
+    width: 60px;
+    padding: 10px;
+    border-bottom: 1px solid #e7e7e7;
+    width: 100%;
+    background-color: white;
+}
+
+.noselect {
+    -webkit-user-select: none; /* Chrome/Safari */
+    -moz-user-select: none; /* Firefox */
+    -ms-user-select: none; /* IE10+ */
+    -o-user-select: none;
+    user-select: none;
+}
+
+.btn + .btn {
+    margin-left: 5px;
+}
+
+.btn-graph-goto {
+    box-shadow: none!important;
+}
+
+.nav-tabs {
+    border-bottom: none;
+}
+
+.main-navigation a.nav-link {
+    color: white;
+}
+
+.main-navigation a.nav-link.active {
+    color: #212529;
+}
+
+.dualbox-editor-body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: rgb(85, 85, 85);
+}
+
+.dualbox-graph-left-section {
+    height: 100%;
+    width: 500px;
+    float: left;
+    position: relative;
+    overflow: hidden;
+    margin-left: -465px;
+    transition: margin-left 0.3s ease;
+}
+
+.dualbox-graph-left-window {
+    width: calc(100% - 35px);
+    height: calc(100% - 20px);
+    margin-top: 10px;
+    margin-bottom: 30px;
+    /* background-color: #ECF2F8; */
+    background-color: #f8f9fa;
+    border: 1px solid grey;
+    border-radius: 5px;
+    position: relative;
+    float: left;
+}
+
+.dualbox-graph-left-panel {
+    width: 100%;
+    height: 100%;
+}
+
+.btn-toggle-left-window {
+    position: absolute;
+    right: 0;
+    top: 0;
+    margin-right: -35px;
+    z-index: 100;
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+}
+
+.dualbox-graph-right-section {
+    height: 100%;
+    width: 500px;
+    float: right;
+    position: relative;
+    overflow: hidden;
+    margin-right: -465px;
+    transition: margin-right 0.3s ease;
+}
+
+.dualbox-graph-right-window {
+    width: calc(100% - 35px);
+    height: calc(100% - 20px);
+    margin-top: 10px;
+    margin-bottom: 30px;
+    /* background-color: #ECF2F8; */
+    background-color: #f8f9fa;
+    border: 1px solid grey;
+    border-radius: 5px;
+    position: relative;
+    float: right;
+}
+
+.dualbox-graph-right-panel {
+    width: 100%;
+    height: 100%;
+}
+
+.btn-toggle-right-window {
+    position: absolute;
+    left: 0;
+    top: 0;
+    margin-left: -35px;
+    z-index: 100;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+}
+
+.dualbox-graph-tab {
+    height: 100%;
+    width: 100%;
+    background-color: #555!important;
+}
+
+.dualbox-graph-main {
+    height: 100%;
+    width: calc(100% - 70px);
+    float: right;
+    background-color: #555!important;
+    transition: width 0.3s ease;
+}
+
+.dualbox-graph-main.left-panel-expanded {
+    width: calc(100% - 535px);
+    margin-left: -465px;
+}
+
+.dualbox-graph-main.right-panel-expanded {
+    width: calc(100% - 535px);
+}
+
+.dualbox-graph-main.left-panel-expanded.right-panel-expanded {
+    width: calc(100% - 1000px);
+    margin-left: -465px;
+}
+
+.dualbox-graph-canvas {
+    height: 100%;
+    width: 100%;
+    background-color: #eee;
+    position: relative;
+    outline-color: transparent!important;
+}
+
+.opacity0 {
+    opacity: 0;
+}
+
+.btn-editor-xs {
+    width: 18px;
+    padding  : 3px!important;
+    line-height  : .5;
+    border-radius : 2px;
+}
+
+.btn-editor-xs > i {
+    font-size  : 10px;
+}
+
+.btn-outline-discrete {
+    border-color: rgba(0,0,0,0.05);
+    border-color: transparent;
+    color: rgba(0,0,0,0.3);
+}
+
+.dualbox-app-navigation {
+    background-color: transparent;
+    margin-bottom: 0;
+    vertical-align: middle;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    font-weight: bold;
+    user-select: none;
+}
+
+.dualbox-graph-container {
+    padding: 0px 0px 30px 0px;
+    margin-left: -25px;
+    margin-right: -25px;
+    height: 100%;
+    width: calc(100% + 50px);
+    overflow: hidden;
+    transform: translateZ(0); /* chrome hack to avoid glitches */
+}
+
+.dualbox-graph-container.translating {
+    cursor: move;
+}
+
+.dualbox-graph-canvas {
+    min-height: 100%;
+    min-width: 100%;
+    border-radius: 5px;
+    position: relative;
+
+    background-color: #ECF2F8;
+    border: 1px solid #2e6da4;
+    display: inline-block; /* fix padding pb: https://stackoverflow.com/questions/10054870/when-a-child-element-overflows-horizontally-why-is-the-right-padding-of-the-par */
+    margin-bottom: -7px;
+}
+
+.app-topbar {
+    border-bottom: none;
+    padding-left: 15px;
+    padding-right: 15px;
+    display: flex;
+    width: 100%;
+    height: 58px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+.dark, .graph-tab.active, .nav-item.active .graph-tab {
+    color: white!important;
+    background-color: #555!important;
+}
+
+.light {
+    color: #4d4d4d!important;
+    background-color: #f8f9fa!important;
+}
+
+.main-navigation .nav-link, .main-navigation .nav-link.active, .nav-item.active .nav-link {
+    border-bottom: none;
+    border-left: none;
+    border-top: none;
+    border-right: none;
+    position: relative;
+    top: 1px;
+}
+
+.btn:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.btn-transparent, .btn-transparent:hover, .btn-transparent:focus {
+    background-color: transparent;
+}
+
+.connection-control {
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    background-color: transparent;
+    z-index: 19;
+    cursor: move;
+}
+
+.connection-control.selected {
+    border-color: #0066ff;
+    box-shadow: 1px 1px 10px #0066ff;
+}
+
+.connection-label {
+    z-index: 22!important;
+    color: #004d00!important;
+    background-color: white!important;
+    padding: 4px 4px;
+    border: 2px solid #004d00;
+    font-size: 16px!important;
+    border-radius: 5px;
+}
+
+.dualbox-graph-container span {
+    pointer-events: none;
+}
+
+/* ex-plumb.css */
+.dualbox-graph-canvas .marker-color-tag {
+    height: 8px;
+    margin: 0 3px 3px 0;
+    padding: 0;
+    width: 42px;
+    line-height: 75pt;
+    border-radius: 3px;
+    display: block;
+    width: 100%;
+}
+
+.input-color-tag {
+    background-color: #F2D600;
+}
+
+.output-color-tag {
+    background-color: #FFAB4A;
+}
+
+.ui-color-tag {
+    background-color: #61BD4F;
+}
+
+.metanode-color-tag {
+    background-color: #DDDDDD;
+}
+
+.input {
+}
+
+.output {
+}
+
+.dualbox-graph-canvas .jsplumb-connector {
+    z-index: 4;
+}
+
+.dualbox-graph-canvas .jsplumb-endpoint {
+    z-index: 30;
+}
+.dualbox-graph-canvas .inoutEndpointLabel, .endpointSourceLabel {
+    box-shadow: 1px 1px 1px #716f6f;
+    -o-box-shadow: 1px 1px 1px #716f6f;
+    -webkit-box-shadow: 0px 1px 1px #716f6f;
+    -moz-box-shadow: 1px 1px 1px #716f6f;
+    z-index: 2000;
+    transform:translate(0%,0%) !important; /* this shit is just to prevent jsplumb of centering the box on the endpoint... */
+}
+.dualbox-graph-canvas .descSpan {
+    box-shadow: 1px 1px 1px #716f6f;
+    -o-box-shadow: 1px 1px 1px #716f6f;
+    -webkit-box-shadow: 0px 1px 1px #716f6f;
+    -moz-box-shadow: 1px 1px 1px #716f6f;
+    position: fixed;
+    display:none;
+    z-index:2010;
+}
+
+.dualbox-graph-canvas .aLabel {
+    background-color: white;
+    padding: 0.4em;
+    font: 12px sans-serif;
+    color: #444;
+    z-index: 21;
+    border: 1px dotted gray;
+    opacity: 0.8;
+    cursor: pointer;
+}
+
+.dualbox-graph-canvas .aLabel.jsplumb-hover {
+    background-color: #5C96BC;
+    color: white;
+    border: 1px solid white;
+}
+
+.card.jsplumb-connected {
+    /*border: 1px solid #a1a1a1; change border when connected to spot isolated elements as disabled*/
+}
+
+.jsplumb-drag {
+    opacity:0.7 !important;
+}
+
+path, .jsplumb-endpoint {
+    cursor: pointer;
+}
+
+.jsplumb-overlay {
+    background-color:transparent;
+}
+
+.fileUpload {
+    position: relative;
+    overflow: hidden;
+    margin: 10px;
+}
+.fileUpload input.upload {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin: 0;
+    padding: 0;
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0;
+    filter: alpha(opacity=0);
+}
+
+
+.module-edit-modal-body .btn+.btn {
+    margin-bottom: 0;
+    margin-left: 5px;
+}
+
+.btn-add-node {
+    width:46%;
+    margin:1%;
+}
+
+button.close {
+    position: absolute;
+    right: 0;
+    margin-right: 5px!important;
+}

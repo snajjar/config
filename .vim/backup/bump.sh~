@@ -1,0 +1,1 @@
+gulp build-node && gulp build-browser && gulp update && gulp update && gulp bump && gulp update-app && gulp repo --cmd "git add ." && gulp repo --cmd "git commit -m update-bump" && gulp repo --cmd "git push" && gulp upload

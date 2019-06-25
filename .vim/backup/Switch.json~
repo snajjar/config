@@ -1,0 +1,120 @@
+{
+    "name": "dualbox-core-switch",
+    "version": "*",
+    "description": "Resolve the condition value, then retrieve and respond with the matching value. If no match, respond with value value",
+    "dualbox" : {
+        "input"  : {
+            "cond" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true
+            },
+            "case1" : {
+                "type": "*",
+                "typeLink": "condition",
+                "typeLink": "value",
+                "const": true
+            },
+            "ifCase1": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true
+            },
+            "case2" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase2": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case3" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase3": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case4" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase4": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case5" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase5": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case6" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase6": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case7" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase7": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "case8" : {
+                "type": "*",
+                "typeLink": "condition",
+                "const": true,
+                "value": null
+            },
+            "ifCase8": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true,
+                "value" : null
+            },
+            "default": {
+                "type": "*",
+                "typeLink": "value",
+                "const": true
+            }
+        },
+        "output" : {
+            "result" : {
+                "type": "*",
+                "typeLink": "value"
+            }
+        }
+    }
+}

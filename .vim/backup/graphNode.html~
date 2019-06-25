@@ -1,0 +1,227 @@
+@{ var utils = require('../../m/DualboxUtils') }
+
+@!(data)
+@{ var id = data.example ? data.id + "-junk" : data.id; }
+<div class="jtk-node card card-node @cardColor(data.id) @cardLoop(data.id) @cardSnapshot(data.id) contextmenu" id="@(id)" data-id="@(data.id)" data-name="@(data.pkg.name)" style="overflow: visible;">
+    @if( data.n.hasComment() ) {
+        <div class="card-comment">
+            <i class="fas fa-comment-alt" data-container="body" data-toggle="popover" data-placement="top" data-content="@(data.n.getComment())"></i>
+        </div>
+    }
+
+    @if( data.n.hasSnapshot() ) {
+        <div class="card-status">
+            @if( data.n.isSnapshotStatus(0) ) {
+                <div class="card-status-idle">
+                    <span>IDLE</span>
+                    <button class="btn btn-editor-xs btn-outline-secondary btn-outline-discrete btn-snapshot-details d-inline-block" data-id="@(data.id)"><i class="fas fa-info-circle"></i></button>
+                </div>
+            }
+            @if( data.n.isSnapshotStatus(1) ) {
+                <div class="card-status-computing">
+                    <span>COMPUTING</span>
+                    <button class="btn btn-editor-xs btn-outline-secondary btn-outline-discrete btn-snapshot-details d-inline-block" data-id="@(data.id)"><i class="fas fa-info-circle"></i></button>
+                </div>
+            }
+            @if( data.n.isSnapshotStatus(2) ) {
+                <div class="card-status-awaiting-data">
+                    <span>WAITING</span>
+                    <button class="btn btn-editor-xs btn-outline-secondary btn-outline-discrete btn-snapshot-details d-inline-block" data-id="@(data.id)"><i class="fas fa-info-circle"></i></button>
+                </div>
+            }
+            @if( data.n.isSnapshotStatus(3) ) {
+                <div class="card-status-ready">
+                    <span>READY</span>
+                    <button class="btn btn-editor-xs btn-outline-secondary btn-outline-discrete btn-snapshot-details d-inline-block" data-id="@(data.id)"><i class="fas fa-info-circle"></i></button>
+                </div>
+            }
+        </div>
+    }
+
+    @if( !data.example && data.n.isUI() && !data.n.isOnAPanel() ) {
+        <div class="card-problem">
+            <i class="fas fa-exclamation-circle" data-container="body" data-toggle="popover" data-placement="top" data-content="This UI is not set in a panel. It won't have any effect. Go to the Interface tab to add it to a panel."></i>
+        </div>
+    }
+
+    <div class="card-top">
+        <div class="d-flex">
+            <span class="title" style="white-space: nowrap; margin-right: 5px;">
+                @if( data.n.isMetanode() ) { <span class="badge badge-secondary"><b>META</b></span> }
+                @(data.n.graphId)
+                @if( data.n.isParallel() ) { <i class="fas fa-server" style="color: orange;" title="this module is computed in a web worker"></i> }
+            </span>
+
+            <div class="ml-auto">
+                <button class="btn btn-outline-secondary btn-outline-discrete btn-editor-xs btn-settings"><i class="fas fa-cog"></i></button>
+            </div>
+        </div>
+    </div>
+    @if( !data.n.isInput() && !data.n.isOutput() ) {
+    <div class="card-center">
+        <hr style="margin-bottom: 5px;"/>
+        <div class="dualbox-io" style="overflow: visible;">
+            <div class="inputs" style="display: inline-block; float: left;">
+                <div class="box-inputs">
+                    @{var keys = data.n.getInputsNames(); }
+                    @if( keys && keys.length > 0 ) {
+                        <div class="types">
+                        @* Build types *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @{var inputDesc = data.n.getInputDef(key); }
+                            @if( data.n.isInputVisible(key) ) {
+                                <span class="type" data-key="@key">@( data.utils.htmlentities(data.n.getInputType(key)) )</span>
+                            }
+                        }
+                        </div>
+
+                        <div class="points">
+                        @* Build points *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @{var inputDesc = data.n.getInputDef(key); }
+                            @if( data.n.isInputVisible(key) ) {
+                                <div class="point" data-key="@key" data-type="@(inputDesc.type)">@point()</div>
+                            }
+                        }
+                        </div>
+                        <div class="names">
+                        @* Build names *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @{var inputDesc = data.n.getInputDesc(key); }
+                            @if( data.n.isInputVisible(key) ) {
+                                <span class="name @if(data.n.isFeedbackTarget(key)){feedback}" data-input="@(key)">
+                                    @if( data.n.hasIterator(key) ) {
+                                       &lt;@(key)&gt;
+                                    }
+                                    else {
+                                        @(key)
+                                    }
+                                    @if( !data.n.isInputConst(key) ) {
+                                        <small><i class="fas fa-clone transparent"></i></small>
+                                    }
+                                </span>
+                            }
+                        }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="outputs" style="display: inline-block; float: right">
+                <div class="box-outputs">
+                    @{var keys = data.n.getOutputsNames() }
+                    @if( keys && keys.length > 0 ) {
+                        <div class="names">
+                        @* Build names *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @if( data.n.isOutputVisible(key) ) {
+                                <span class="name @if(data.n.hasFeedback(key)){feedback}" data-output="@(key)">
+                                    @if( data.n.hasLoop() ) {
+                                        @if( data.n.hasFeedback(key) ) {
+                                             @(key)
+                                        }
+                                        else {
+                                             &lt;@(key)&gt;
+                                        }
+                                    }
+                                    else {
+                                         @(key)
+                                    }
+
+                                    @if( data.n.hasCacheActivated() ) {
+                                        &nbsp;<i class="fa fa-hdd" title="This module has cache activated"></i>
+                                    }
+                                </span>
+                            }
+                        }
+                        </div>
+
+                        <div class="points">
+                        @* Build points *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @{var outputDesc = data.n.getOutputDef(key); }
+                            @if( data.n.isOutputVisible(key) ) {
+                                <div class="point" data-key="@key" data-type="@(outputDesc.type)">@point()</div>
+                            }
+                        }
+                        </div>
+
+                        <div class="types">
+                        @* Build types *@
+                        @for(var i=0; i<keys.length; i++) {
+                            @{var key = keys[i] }
+                            @{var outputDesc = data.n.getOutputDef(key); }
+                            @if( data.n.isOutputVisible(key) ) {
+                                <span class="type" data-key="@key">@( data.utils.htmlentities(data.n.getOutputType(key)) )</span>
+                            }
+                        }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    }
+    <hr style="margin-top: 5px;"/>
+    <div class="card-bottom">
+        <span class="subtitle">@( data.utils.htmlentities(shortname(data.id, data.pkg.name)) )</span>
+        @if( data.n.isMetanode() ) {
+        <div class="d-inline-block">
+            <button class="btn btn-outline-secondary btn-outline-discrete btn-editor-xs btn-enter-metanode"><i class="fas fa-sign-in-alt"></i></button>
+        </div>
+        }
+
+        <!--
+        @if( data.n.isUI() ) {
+            <div class="event-dock event-dock-bottom"></div>
+        }
+        -->
+    </div>
+</div>
+
+@function cardColor( id ) {
+    @if( data.n.isUI() ) { card-ui }
+    else if( data.n.isMetanode() ) { card-metanode }
+    else if( data.n.isInput() ) { card-input }
+    else if( data.n.isOutput() ) { card-output }
+}
+
+@function cardLoop( id ) {
+    @if( data.n.hasLoop() ) { card-loop }
+}
+
+@function cardSnapshot(id) {
+    @if( data.n.hasSnapshot() ) {
+        card-snapshot
+        @if( data.n.isSnapshotStatus(0) ) {
+            card-snapshot-idle
+        }
+        @if( data.n.isSnapshotStatus(1) ) {
+            card-snapshot-computing
+        }
+        @if( data.n.isSnapshotStatus(2) ) {
+            card-snapshot-awaiting-data
+        }
+        @if( data.n.isSnapshotStatus(3) ) {
+            card-snapshot-ready
+        }
+    }
+}
+
+@function shortname( id, pkgName ) {
+    @if( data.n.isInput() || data.n.isOutput() ) {
+        @( data.n.getType() )
+    }
+    else {
+        @{ var shortname = utils.shortName(pkgName) }
+        @(shortname)
+    }
+}
+
+@function point() {
+    <svg width="14" height="14" pointer-events="all" position="absolute" version="1.1" xmlns="http://www.w3.org/1999/xhtml"><circle cx="7" cy="7" r="5" version="1.1" xmlns="http://www.w3.org/1999/xhtml" fill="#ffffff" stroke="#727272" style="" stroke-width="2"></circle></svg>
+}

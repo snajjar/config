@@ -1,0 +1,1808 @@
+import { setImmediate, setTimeout } from 'timers';
+import { valid, satisfies } from 'semver';
+
+const Type = require('../Type');
+const IOEmitter = require('./IOEmitter');
+const pattern = require('../utils/pattern');
+const errors = require('../Errors');
+const env = require('../Env');
+const _ = require('@dualbox/dualbox-lib-lodash');
+const idx = require('idx');
+const misc = require('../utils/misc');
+const uuid = require('../utils/uuid');
+
+Object.size = function(obj) {
+    var size = 0, key;
+    for (key in obj) {
+        if (obj.hasOwnProperty(key)) size++;
+    }
+    return size;
+};
+
+var check = function(desc, attrs) {
+    if( !attrs.tag ) {
+        throw new errors.ImplementationError("Every DualBox node should be instanciated with a tag");
+    }
+    if( !attrs.id ) {
+        throw new errors.ImplementationError("Every DualBox node should be instanciated with an id");
+    }
+    if( !attrs.rootApp ) {
+        if( !env.worker ) {
+            throw new errors.ImplementationError("Every DualBox node should be instanciated with a rootApp");
+        }
+    }
+
+    // check version number for components (but not metamodules)
+    if( !env.worker && !env.getOptions().noVersionCheck ) {
+        if( desc.name.startsWith('@dualbox/dualbox') && !desc.name.startsWith('@dualbox/dualbox-core') ) {
+            // check if our version satisfies the application request
+            // check for dualbox components only (not metamodules)
+            if( !satisfies(desc.version, attrs.appDesc.version) ) {
+                throw new errors.CompileError('Instanciating ' + attrs.appDesc.id + ' of module ' + desc.name + ' : ' +
+                    "package version is '" + desc.version + "' but app required '" + attrs.appDesc.version + "'");
+            }
+
+            // in a browser bundle, we want the application description to be
+            // setting a precise version number
+            if( env.browser && !env.worker ) {
+                if( !valid(attrs.appDesc.version) ) {
+                    throw new errors.ImplementationError("In browser, all versions should be precisely defined. Application " +
+                        "defined version '" + attrs.appDesc.version + "' component " + attrs.appDesc.id + " of module " + desc.name +
+                        " which is not a valid version number");
+                }
+            }
+        }
+    }
+}
+
+/*
+ *   Represents a I/O Node, which is the core class
+ *   of DualBox Component (= Module or UI Component)
+ *   attrs should contain at least:
+ *   - an id
+ *   - a tag
+ *   - the root app
+ */
+class IONode extends IOEmitter {
+    constructor(desc, attrs) {
+        check(desc, attrs);
+
+        var tag = attrs.tag;
+        var loggerOptions = attrs.loggerOptions || {};
+
+        super(tag, loggerOptions);
+        this.id = attrs.id;
+        this.rootApp = attrs.rootApp;
+
+        // save version for debugging and version checking
+        this.version = desc.version;
+
+        // Keep track of all listeners this node has created.
+        this.nodeListeners = {};
+
+        // Setup the input and output attribute based on the description
+        // (dynamic data when solving the application)
+        this.inputValue = {};
+        this.inputValid = {};
+
+        // tells if the node launched an invalidate event already
+        this.invalidateSent = false;
+
+        // tells if the node launched a read event already
+        this.readSent = false;
+
+        // types holder
+        this.inputType  = {};
+        this.outputType  = {};
+
+        // Used to store default values
+        this.defaultValue = {};
+
+        // Setup the link sets (static data once the graph is built)
+        this.links = {
+            input:{
+                //x:{node:<ref>,key:"string"}
+            },
+            output:{
+                //y:[{node:<ref>,key:"string"}]
+            }
+        };
+
+        // node status (idle, computing or awaiting for result)
+        this.setStatus(IONode.status.IDLE);
+
+        this.desc = desc; // package json
+        this.appDesc = attrs.appDesc;
+
+        // Array of linked stars
+        // "condition" => Number will mean that all inputs/output with a "typeLink" attribute set to "condition" will have
+        // type Number.
+        // "*" is the default typeLink (when no typeLink defined)
+        this.starTypes = { "*" : null };
+
+        this.eventList = []; // array of events to send when we're done computing (emitting data)
+
+        // setup the start state of the module
+        this.setupInputs();
+        this.setupOutput();
+
+        // indicates if the node is currently evaluating
+        this.evaluating = false;
+
+        // indicates if this node is allowed to restart computation on interruption
+        this.allowedToRestart = true;
+
+        // False at construction. Will be called on link in app.
+        this.initialized = false;
+
+        // Log times for snapshot/debugging purposes
+        this.times = {
+            emissions : {
+                lastData: null,
+                lastInvalidate: null,
+                lastRead: null,
+                lastReady: null,
+                nbData: 0,
+                nbInvalidate: 0,
+                nbRead: 0,
+                nbReady: 0,
+            },
+            evaluations: {
+                lastStart: null,
+                lastEnd: null,
+                lastCancel: null
+            }
+            /*
+            receptions: {
+                outputs: null, // object with last read for each output
+                inputs: null, // object with last invalidate and last data for each input
+            }
+            */
+        }
+    }
+
+    recordEventSent(eventName, eventData) {
+        if( !env.getRecord() ) return;
+
+        var d = new Date();
+
+        switch(eventName) {
+        case "data":
+            // only keep track of small data
+            var data = {};
+            _.each(eventData.output, (v, k) => {
+                //data[k] = this.getSnapshotValue(v);
+                if( misc.isRoughSizeOfObjectMoreThan(v, 200) ) {
+                    data[k] = "[[removed]]";
+                }
+                else {
+                    // This should work all the time but seems to fail in CubeTexture sometimes.
+                    // TODO max: fix
+                    data[k] = Type.safeSerialize(v);
+                }
+            });
+            this.times.emissions.lastData = {
+                date: d,
+                data: data
+            }
+            this.times.emissions.nbData++;
+            break;
+        case "invalidate":
+            this.times.emissions.lastInvalidate = {
+                date: d,
+                data: eventData.keys
+            }
+            this.times.emissions.nbInvalidate++;
+            break;
+        case "read":
+            this.times.emissions.lastRead = {
+                date: d,
+                data: eventData.missing,
+            }
+            this.times.emissions.nbRead++;
+            break;
+        case "ready":
+            this.times.emissions.lastReady = {
+                date: d
+            }
+            this.times.emissions.nbReady++;
+            break;
+        default:
+            // do nothing
+        }
+    }
+
+    recordEvaluationStart() {
+        if( !env.getRecord() ) return;
+        this.times.evaluations.lastStart = {
+            date : new Date(),
+        }
+    }
+
+    recordEvaluationCancel(reason) {
+        if( !env.getRecord() ) return;
+        this.times.evaluations.lastCancel = {
+            date : new Date(),
+            reason: reason
+        }
+    }
+
+    recordEvaluationEnd() {
+        if( !env.getRecord() ) return;
+        this.times.evaluations.lastEnd = {
+            date : new Date(),
+        }
+    }
+
+    /*
+    recordEventReceived(eventName, eventData) {
+        var d = new Date();
+
+        switch(eventName) {
+        case "data":
+            break;
+        case "invalidate":
+            this.times.receptions.input[key].lastInvalidate = {
+                date: d,
+                data: {
+                    keys: eventData.keys
+                }
+            }
+            break;
+        case "read":
+            break;
+        case "ready":
+            break;
+        default:
+            // do nothing
+        }
+    }
+    */
+
+    startEvaluation() {
+        this.evaluating = true;
+        this.recordEvaluationStart();
+    }
+
+    isEvaluating() {
+        return this.evaluating;
+    }
+
+    doneEvaluation() {
+        this.evaluating = false;
+        this.recordEvaluationEnd();
+    }
+
+    cancelEvaluation(reason) {
+        this.evaluating = false;
+        this.setStatus(IONode.status.AWAITING_DATA); // This will be changed by retrigger if node is ready
+        this.recordEvaluationCancel(reason);
+        this.retrigger();
+    }
+
+    getTimes() {
+        return this.times;
+    }
+
+    setRootApp( app ) {
+        this.rootApp = app;
+    }
+
+    getRootApp() {
+        if( this.rootApp ) {
+            return this.rootApp;
+        }
+        else {
+            return {
+                trycatch : function( tryFunction, catchFunction ) {
+                    if( env.getRemoveTryCatch() ) {
+                        tryFunction();
+                    }
+                    else {
+                        try {
+                            tryFunction();
+                        }
+                        catch( e ) {
+                            if( catchFunction ) catchFunction(e);
+                            throw e; // node.js, rethrow
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Get the global application session (variables shared between modules)
+    getGlobalSession() {
+        var rootApp = this.getRootApp();
+        if( rootApp.session ) {
+            return rootApp.session;
+        }
+        else {
+            throw new errors.ImplementationError(this.id + ' cant access root application: Session unavailable');
+        }
+    }
+
+    // get the local node session (variables local to this node)
+    getNodeSession() {
+        var session = this.getGlobalSession();
+        return session.getSubSession( this.id );
+    }
+
+    // conveniance accessor
+    getSession() {
+        return this.getNodeSession();
+    }
+
+    allowRestart( b ) {
+        this.allowedToRestart = b;
+    }
+
+    // By default, just set the boolean.
+    initialize() {
+        this.initialized = true;
+    }
+    isInitialized(){
+        return this.initialized;
+    }
+
+    nbLinkedInputs() {
+        return Object.keys(this.links.input).length;
+    }
+
+    nbLinkedOutputs() {
+        return Object.keys(this.links.output).length;
+    }
+
+    // execute f(node) on all nodes and subnodes
+    // Function takes the node as a paremeter
+    reduce(f) {
+        f(this);
+    }
+
+    // do nothing on IONode, apply function on metanodes
+    reduceApps(f) {
+
+    }
+
+    loadAppDefaultsInputs(data) {
+        // Set the default values of the node, if any
+        // Note : must be type converted from json definition.
+        var true_data = {};
+        if(data.defaultInputs !== undefined) {
+            var di_keys = Object.keys(data.defaultInputs);
+            for(var i=0; i<di_keys.length; ++i){
+                var key = di_keys[i];
+                if( this.desc.dualbox.input[di_keys[i]] === undefined ) {
+                    throw new errors.CompileError("cannot set default input on " + this.id + ":" + key +
+                        ", the key doesn't exist in " + this.desc.name + " package definition");
+                }
+
+                var json = data.defaultInputs[key];
+                if(json && json.type && json.value){
+                    throw new errors.TypeError("Module "+this.id + " : This is the old format with type and value, please use new JSON formats to be parsed by Type (note that the type must always be defined properly except for native types like number, string boolean) : ");
+                }
+
+                //try {
+                    var extypes = this.getExtendedInputTypes(key);
+                    var json = data.defaultInputs[key];
+
+                    var done = false;
+                    var k = 0;
+                    var exceptions = [];
+                    while(!done && k<extypes.length){
+                        try {
+                            var type = extypes[k];
+                            if(type.indexOf("*") !== -1){
+                                if(json !== null){
+                                    var detype = Type.detectType(json);
+                                    if(detype === null){
+                                        throw new errors.TypeError("Cannot detect type of default value for key "+key+". You should maybe specify the type (Or this is a DualBox bug).");
+                                    }
+                                    if(!Type.typeMatch(detype,type)){
+                                        throw new errors.TypeError("Json defines a type ("+json.type+") wich is not compatible with the dynamic resolution type("+type+")");
+                                    }else{
+                                        type = detype;
+                                        this.setInputType(key, type);
+                                    }
+                                }
+                            }
+                            true_data[key] = Type.loadFromJSON(json, type);
+                            done = true;
+                        }
+                        catch(e){
+                            exceptions.push(e);
+                            ++k;
+                        }
+                    }
+                    if(!done){
+                        var msg = "";
+                        for(var ei=0; ei<exceptions.length; ++ei){
+                            msg += "\n" + exceptions[ei].message;
+                        }
+                        throw new errors.TypeError("Tried to set default input using all accepted extended types and got the following errors : " + msg);
+                    }
+                //}
+                //catch(e) {
+                //    if( e.name == "TypeError" ) {
+                //        console.error(e.stack);
+                //        throw new errors.TypeError("Error setting default value of " + this.id + ":" + key + ", " + e.message);
+                //    }
+                //    else {
+                //        throw e;
+                //    }
+                //}
+            }
+
+            this.setDefaultInputs(true_data);
+        }
+    }
+
+    // Make the parameter function interruptible on a change
+    // Also make it catch exceptions
+    // For a closure, make sure the function returned is made interruptible through this method
+    interruptible( f ) {
+        var self = this;
+        this.debug("Launch interruptible callback", { userOrigin: false, event: true });
+
+        return function() {
+            // worker interruption is handle directly by the workerpool
+            if( !self.isReady() ) {
+                self.debug("[DISCARD] %s is not ready anymore", self.id, { userOrigin: false });
+                self.retrigger();
+                return;
+            }
+            else {
+                var args = arguments;
+                if( self.getRootApp() && !env.getRemoveTryCatch() ) {
+                    self.getRootApp().trycatch(function() { // catch errors
+                        f.apply(self, args); // run the function with the given args
+                    });
+                }
+                else {
+                    f.apply(self, args);
+                }
+            }
+        };
+    }
+
+    // enable the sending of INVALIDATE message
+    enableInvalidate() {
+        this.debug("%s enable invalidate", this.id, { userOrigin: false });
+        this.invalidateSent = false;
+    }
+
+    // disable the sending of INVALIDATE message (if the node is not allowed to restart itself)
+    disableInvalidate() {
+        this.debug("%s disable invalidate", this.id, { userOrigin: false });
+        this.invalidateSent = true;
+    }
+
+    canInvalidate() {
+        return !this.invalidateSent;
+    }
+
+    enableRead() {
+        this.debug("%s enable read", this.id, { userOrigin: false });
+        this.readSent = false;
+    }
+
+    disableRead() {
+        this.debug("%s disable read", this.id, { userOrigin: false });
+        this.readSent = true;
+    }
+
+    canRead() {
+        return !this.readSent;
+    }
+
+    // asynchronously execute a interruptible callback
+    // can be cleared by Timers.clearTimeout
+    asynchrone( f ) {
+        if( env.getMakeSynchrone() ) {
+            return f();
+        }
+        else {
+            return setImmediate(this.interruptible(f), 0);
+        }
+    }
+
+    /**
+     *  Connect the node to the other nodes of the graph with data event
+     *  @param {Object} data Node information found in app.json
+     *  @param {Object<string,IONode>} IONodes mapped by ids
+     */
+    connect(data, nodes){
+        // now build the link
+        // reminder link definition (in json.modules[i].links) :
+        //      links : {
+        //          inputName:{
+        //              nodeName:outputName
+        //          }
+        //      }
+        this.appDesc = data;
+
+        // Link nodes input and output
+        if( data.links ) {
+            var lkeys = Object.keys(data.links);
+            for(var i=0; i<lkeys.length; ++i){
+                var link = data.links[lkeys[i]];
+                var id_from = Object.keys(link)[0];
+                if(id_from === undefined){
+                    throw new errors.CompileError("node " + data.id + " has set a link key (" + lkeys[i] +") but no link is actually set for this key - ie json link definition is empty.");
+                }
+                if( nodes[id_from] === undefined ) {
+                    // not necessary an error, it could be an app which is loaded without instanciating the UI
+                    this.warn('node ' + id_from + ' does not exist, ignoring link from ' + this.id + ' : ' + link[id_from]);
+                }
+                else {
+                    this.debug("adding link %s %s --data--> %s %s",
+                        nodes[id_from].id, link[id_from], this.id, lkeys[i], { userOrigin: false });
+                    this.linkInput( lkeys[i], nodes[id_from], link[id_from] );
+                }
+            }
+        }
+
+        // Link node events
+        if( data.events ) {
+            for(var i=0; i<data.events.length; i++) {
+                var e = data.events[i];
+
+                if( e.node ) {
+                    var node = nodes[e.node];
+                    if( node ) {
+                        // link this node to us
+                        this.on(node, 'UIEvent.' + e.event, node.getEventCb(e.event));
+
+                        // add this node to our eventList, so we call this event once we're done computing
+                        this.eventList.push({ node: node, name: e.event, data: e.data, if: e.if });
+                    }
+                    else {
+                        // actually, it's possible to have events binded to nothing
+                        // when some parts of the application are not instanciated
+                        this.debug('Cant find node ' + e.node + ' from ' + this.id + ' events - node is not instanciated');
+                        continue;
+                    }
+                }
+                else if( e.selector ) {
+                    // HTML event
+                    this.eventList.push({ selector: e.selector, name: e.event, data: e.data, if: e.if});
+                }
+            }
+        }
+
+        // bind the ready event to the main object
+        this.on(this, 'ready', this.onReady.bind(this)); // onReady
+        this.on(this, 'ready', this.onAfterReady.bind(this)); // onAfterReady;
+
+        this.setDataListeners();
+    }
+
+
+    setStatus( status ) {
+        this.status = status;
+        //this.info("setting status to %s, Invalidate enabled: ", this.getStatusName(), this.enableInvalidateSending, { userOrigin: false });
+    }
+
+    getStatus() {
+        //this.log("%s status was read while beeing to %s", this.id, this.getStatusName());
+        return this.status;
+    }
+
+    getStatusName() {
+        if( this.isStatus(IONode.status.AWAITING_DATA) ) {
+            var invalidInputs = this.getInvalidInputs();
+            return "AWAITING_DATA:" + (invalidInputs.length == 0 ? "None" : invalidInputs);
+        }
+        else {
+            return IONode.statusName[ this.status ];
+        }
+    }
+
+    onReady() {
+        this.setStatus(IONode.status.READY);
+        this.startEvaluation();
+    }
+
+    // after onReady has been executed
+    onAfterReady() {
+    }
+
+    // Do check that the node has registered with all other necessary objects.
+    // Nothing to do in most cases, see an example in Widget3D.
+    checkRegistering(){
+        return true;
+    }
+
+    emit(eventName, eventData){
+        var data = {
+            node:this
+        };
+
+        if( eventName == "read" ) {
+            this.debug("[EVENT] %s EMITS %s", this.id, eventName, { userOrigin: false, event: true });
+        }
+
+        if( eventName == "data" && eventData.node === data.node ){
+            throw new errors.RuntimeError("Node " + this.id + " wants to emit an event with field 'node' defined, " +
+                "which is a restricted field. Please use another field name");
+        }
+
+        // check if all emitted data is correct according to output
+        if( eventName == "data" ) {
+            var keys = Object.keys(eventData);
+            for(let i=0; i<keys.length; i++) {
+                let key = keys[i];
+
+                if( ! (key in this.links.output ) ) {
+                    throw new errors.RuntimeError(this.id + " emitting data with output key " + key +
+                        " but this key isn't in definition");
+                }
+                if(eventData[key] === undefined){
+                    throw new errors.RuntimeError(this.id + " returned undefined value for key " + key +
+                        ". undefined is not allowed in dualbox data events for now. Please fix your module.");
+                }
+
+                /*
+                // if we send JSON, check that we actually send a JSONObject
+                var outputType = idx(this.desc, o => o.dualbox.output[key].type);
+                if( outputType.toLowerCase() == "json" ) {
+                    // check that we actually sent a JSONObject
+                    if( idx(eventData, o => o[key].constructor.name) !== "JSONObject" ) {
+                        throw new errors.ImplementationError(this.id + ' of type "' + this.desc.name  + '" must return a json on key "' +
+                            key + "\" but didn't wrap it in a JSONObject");
+                    }
+                }
+                */
+            }
+            data.output = eventData;
+
+            this.doneEvaluation(); // node has finished evaluation
+            this.enableInvalidate();
+            this.setStatus(IONode.status.IDLE);
+
+            this.info("[EVENT] %s EMITS %s", this.id, eventName, { userOrigin: false, event: true });
+        }
+        else {
+            if(eventData !== undefined){
+                var keys = Object.keys(eventData);
+                for(let i=0; i<keys.length; i++) {
+                    data[keys[i]] = eventData[keys[i]];
+                }
+            }
+        }
+
+        this.recordEventSent(eventName, data);
+        super.emit(eventName, data);
+    }
+
+    // eval something with a specific context
+    evalCondition(context, src) {
+        // set up an object to serve as the context for the code being evaluated.
+        var mask = {};
+
+        // mask global properties
+        for( var p in this ) {
+            mask[p] = undefined;
+        }
+        for( var p in context ) {
+            mask[p] = context[p];
+        }
+
+        // execute script in private context
+        return (new Function( "with(this) { return " + src + "}; ")).call(mask);
+    }
+
+    // All nodes can emit UI events
+    emitUIEvent(name, data, node) {
+        // If we emit trigger, we need to invalidate
+        this.info('[UI-EVENT] %s emitted to %s with name %s', 'UIEvent.' + name, node.id, name, { userOrigin: false });
+        this.emit('UIEvent.' + name, { command: name, args: data, dest: node });
+    }
+
+    emitHTMLEvent(name, data, selector) {
+        if( env.browser && !env.worker ) {
+            var $ = window.DualBox.$;
+            if( name == "hide" ) {
+                $(selector).hide();
+                $(selector).css('visibility', 'hidden');
+            }
+            else if( name == "show" ) {
+                $(selector).show();
+                $(selector).css('visibility', 'visible');
+            }
+        }
+    }
+
+    emitEvent(e, output) {
+        // if event is conditionnal, check if the condition is matched to send it
+        if( e.if ) {
+            var condition = this.evalCondition( output, e.if );
+            if( !condition ) {
+                this.log("[EVENTS] Condition %s not matched, skip event sending", e.if);
+                return;
+            }
+        }
+
+        if( e.node ) {
+            // it's an event directed to a node
+            this.emitUIEvent(e.name, e.data, e.node);
+        }
+        else if( e.selector ) {
+            // it's an event directed to one or several div
+            this.emitHTMLEvent(e.name, e.data, e.selector);
+        }
+    }
+
+    // Emit all events of the list
+    trigger( output ) {
+
+        if(output === undefined){
+            throw "Error : output should not be undefined in trigger now.";
+        }
+
+        _.each(this.eventList, (e) => {
+            this.emitEvent(e, output);
+        });
+    }
+
+    onInvalidate(msg) {
+        this.debug("[EVENT] %s (state %s) RECEIVED invalidate from %s", this.id, this.getStatusName(),
+            msg.node.id, { userOrigin: false, event: true });
+
+        // find the input key to invalidate from the msg
+        var invalidKeys = [];
+        let inputKeys = Object.keys(this.links.input);
+        for( let i=0; i<inputKeys.length; i++ ) {
+            let inputKey = inputKeys[i];
+            let input = this.links.input[ inputKey ];
+
+            for(var j=0; j<msg.keys.length; j++) {
+                var invalidKey = msg.keys[j];
+
+                if( msg !== undefined ) {
+                    if( input !== null && input.node.id == msg.node.id && input.key == invalidKey ) {
+                        invalidKeys.push(inputKey);
+                    }
+                }
+            }
+        }
+
+        this.interrupt(invalidKeys);
+    }
+
+    getInvalidInputs() {
+        var keys = Object.keys(this.inputValid);
+        var invalidKeys = [];
+        for(var i=0; i<keys.length; i++) {
+            if( !this.inputValid[keys[i]] ) {
+                invalidKeys.push(keys[i]);
+            }
+        }
+        return invalidKeys;
+    }
+
+    canRestart() {
+        return this.allowedToRestart;
+    }
+
+    retrigger() {
+        if( this.canRestart && this.shouldTriggerRead() ) {
+            this.triggerRead();
+        }
+    }
+
+    // Interrupt a node and invalidate the given inputs.
+    interrupt( invalidKeys ) {
+        // We have been interrupted, enable read again
+        this.enableRead();
+
+        // invalid keys
+        var inputsInvalidated = this.invalidInputs( invalidKeys );
+
+        this.log("[INTERRUPT] %s (state %s), invalid keys: %s",
+            this.id, this.getStatusName(), JSON.stringify(this.getInvalidInputs()), { userOrigin: false });
+
+        // invalid all outputs and set node status to INVALID
+        this.invalidOutputs(inputsInvalidated);
+
+        if( !this.isStatus(IONode.status.IDLE) ) {
+            this.cancelEvaluation("IONode's direct interruption");
+        }
+    }
+
+    isRecursive() {
+        return this.app !== undefined && this.looperNode !== undefined;
+    }
+
+    isWaitingForDataFromIdleNode() {
+        // We need to trigger only if we need a data from a IDLE node, which might have been
+        // invalidated since it sends it. The currently computing node (at the interruption moment)
+        // might be in another part of the graph.
+        var keys = Object.keys(this.links.input);
+        for(var i=0; i<keys.length; i++) {
+            let key = keys[i];
+            if( !this.inputValid[key] ) {
+                // if key is a linked input, check status of the connected node
+                if( this.hasLinkedInput(key) ) {
+                    var originNode = this.links.input[key].node;
+                    if( originNode.isStatus(IONode.status.IDLE) ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    // Tell, within an interruption moment, if the node should retrigger a read to
+    // ensure the graph computation will finish
+    shouldTriggerRead() {
+        //return this.isReady() || this.isStatus(IONode.status.READY, IONode.status.COMPUTING, IONode.status.AWAITING_DATA);
+        if( this.isRecursive() ) {
+            // for recursive nodes
+            if( this.isStatus(IONode.status.READY, IONode.status.COMPUTING) ) {
+                return true; // don't break the data pipe
+            }
+            else if( this.isStatus(IONode.status.AWAITING_DATA) ) {
+                // We need to trigger only if we need a data from a IDLE node, which might have been
+                // invalidated since it sends it. The currently computing node (at the interruption moment)
+                // might be in another part of the graph.
+                return this.isWaitingForDataFromIdleNode();
+            }
+            else {
+                return false;
+            }
+        }
+        else {
+            return this.isStatus(IONode.status.READY, IONode.status.COMPUTING) ||
+                this.isReady() ||
+                (this.isStatus(IONode.status.AWAITING_DATA) && this.isWaitingForDataFromIdleNode());
+        }
+
+        /*
+        if( this.isStatus(IONode.status.READY, IONode.status.COMPUTING) ) {
+            return true; // don't break the data pipe
+        }
+        else if( this.isStatus(IONode.status.AWAITING_DATA) ) {
+            // trigger if the node is ready (even though the status is not ready yet)
+            if( !this.isRecursive() && this.isReady() ) {
+                return true;
+            }
+
+            // We need to trigger only if we need a data from a IDLE node, which might have been
+            // invalidated since it sends it. The currently computing node (at the interruption moment)
+            // might be in another part of the graph.
+            var keys = Object.keys(this.links.input);
+            for(var i=0; i<keys.length; i++) {
+                let key = keys[i];
+                if( !this.inputValid[key] ) {
+                    // if key is a linked input, check status of the connected node
+                    if( this.hasLinkedInput(key) ) {
+                        var originNode = this.links.input[key].node;
+                        if( originNode.isStatus(IONode.status.IDLE) ) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        */
+    }
+
+    // manual trigger of onRead event. To be called when interrupting a process that should emit data
+    triggerRead() {
+        this.info("[INTERRUPT] Re-triggering read", { userOrigin: false });
+        //this.setStatus(IONode.status.IDLE); // needed for onRead to launch again
+        this.fetchMissingDataAndCompute();
+    }
+
+    /**
+     *  This function will decide if a clone is needed when setting an nput before computing.
+     *  Default is always true (safest).
+     *  Subclasses can overwrite this function to perform a deeper analysis and decide the smartest way to act.
+     *  @param {IONode} node The node from which the output was get (ie the data.node of the data of event 'data')
+     *  @param {Object} output The data.output of the 'data' event
+     *  @param {string} outkey The key in output we are considering for cloning
+     *  @param {string} inkey The key in this where we are about to save the output.
+     */
+    shouldCloneInputOnData(node, output, outkey, inkey){
+        return !this.isConst(inkey);
+    }
+    // same as above but for default input
+    shouldCloneInputOnDefault(inkey){
+        return !this.isConst(inkey);
+    }
+
+    getInputDescription( key ) {
+        var desc = this.getDescription();
+        return desc.dualbox && desc.dualbox.input && desc.dualbox.input[key];
+    }
+
+    getOutputDescription( key ) {
+        var desc = this.getDescription();
+        return desc.dualbox && desc.dualbox.output && desc.dualbox.output[key];
+    }
+
+    getInputTypeLink( key ) {
+        var desc = this.getInputDescription(key);
+        return desc.typeLink || "*";
+    }
+
+    getOutputTypeLink( key ) {
+        var desc = this.getOutputDescription(key);
+        return desc.typeLink || "*";
+    }
+
+    getInputType( key ) {
+        return this.inputType[key].toLowerCase();
+    }
+
+    // Some extended input types can be accepted by a node.
+    // They will be converted at runtime into the main Input Type.
+    getExtendedInputTypes( key ){
+        return [this.getInputType(key)];
+    }
+
+    getOutputType( key ) {
+        return this.outputType[key];
+    }
+
+    setInputType( key, type_ ) {
+        var type = type_.toLowerCase();
+        if( !type ) {
+            throw new errors.ImplementationError(this.id + ":" + key + " : cannot set type to '" + type + "'");
+        }
+        if( type.indexOf('*') != -1 ) {
+            return; // useless to set type here
+        }
+
+        var inputTypes = this.getExtendedInputTypes(key);
+        for(var i=0; i<inputTypes.length; i++ ) {
+            var inputType = inputTypes[i];
+
+            if( inputType.indexOf("*") !== -1 ) {
+                var starType = pattern.resolveStarType( inputType, type );
+                if( starType != null ) {
+                    this.resolveStar(starType, this.getInputTypeLink(key));
+                    return;
+                }
+            }
+            else {
+                this.inputType[key] = inputType;
+                return;
+            }
+        }
+
+        throw new errors.CompileError("[INPUT TYPE] " + this.id + ':' + key + ' : could not resolve * type in matching '
+            + JSON.stringify(inputTypes) + ' <=> ' + type);
+    }
+
+    setOutputType( key, type ) {
+        if( !type ) {
+            throw new errors.ImplementationError(this.id + ":" + key + " : cannot set type to '" + type + "'");
+        }
+        if( type.indexOf('*') != -1 ) {
+            return; // useless to set type here
+        }
+
+        var currType = this.getOutputType(key);
+
+        if( currType.indexOf("*") !== -1 ) {
+            var starType = pattern.resolveStarType( currType, type );
+            if( starType == null ) {
+                throw new errors.CompileError("[INPUT TYPE] " + this.id + ':' + key + ' : could not resolve * type in matching ' + currType + ' <=> ' + type);
+            }
+            else {
+                this.resolveStar(starType, this.getOutputTypeLink(key));
+            }
+        }
+        else {
+            this.outputType[key] = type;
+        }
+    }
+
+    // set a type to all typeLinked inputs/output (linked to linkName) assigned to '*'
+    // linkName = "*" is for all inputs/output with no typelink
+    resolveStar( type, linkName = "*" ) {
+        if( type.indexOf("*") != -1 ) {
+            return;
+        }
+
+        if( this.starTypes[linkName] !== null && this.starTypes[linkName] !== undefined && this.starTypes[linkName] !== type ) {
+            throw new errors.CompileError("cannot resolve " + this.id + "'s * type to " + type + ", it has already been resolved to " + this.starTypes[linkName]);
+        }
+        else {
+            this.starTypes[linkName] = type;
+        }
+
+        var keys = Object.keys(this.inputType);
+        for(var i=0; i<keys.length; i++) {
+            var key = keys[i];
+            if( this.getInputType(key).indexOf("*") !== -1 ) {
+                if( this.getInputTypeLink(key) == linkName ) {
+                    // set the real type now for this input
+                    this.inputType[key] = this.inputType[key].replace("*", type);
+
+                    // update the node connected to this input
+                    var connection = this.links.input[key];
+                    if( connection ) {
+                        connection.node.setOutputType(connection.key, this.inputType[key]);
+                    }
+                }
+            }
+        }
+
+        keys = Object.keys(this.outputType);
+        for(var i=0; i<keys.length; i++) {
+            var key = keys[i];
+            if( this.getOutputType(key).indexOf("*") !== -1 ) {
+                if( this.getOutputTypeLink(key) == linkName ) {
+                    // set the real type now for this output
+                    this.outputType[key] = this.outputType[key].replace("*", type);
+
+                    // update all nodes connected to this output
+                    if( this.links.output[key] ) {
+                        for(var j=0; j<this.links.output[key].length; j++) {
+                            var connection = this.links.output[key][j];
+                            connection.node.setInputType(connection.key, this.outputType[key]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // push the new data we received in inputValue and inputValid
+    // with intelligent cloning decisions
+    validateNewKeys( data ) {
+        // process data to this.inputValue and this.inputValid
+        if( this.isStatus(IONode.status.AWAITING_DATA) ) {
+            var newValidKeys = [];
+            var keys = Object.keys(this.inputValid);
+            for(var i=0; i<keys.length; ++i){
+                if(!this.inputValid[keys[i]]){
+                    // Check if the data received can validate this input.
+                    var link = this.links.input[keys[i]];
+                    if( link && link.node === data.node ){
+                        this.inputValue[keys[i]] = this.shouldCloneInputOnData(data.node, data.output, link.key, keys[i]) ?
+                            Type.clone(data.output[link.key]) :
+                            data.output[link.key];
+                        this.inputValid[keys[i]] = true;
+                        newValidKeys.push( keys[i] ); // push result;
+                    }
+                }
+            }
+
+            return newValidKeys;
+        }
+        else {
+            return [];
+        }
+    }
+
+    onData( data ) {
+        if( data.node === undefined ) {
+            throw new errors.RuntimeError("node " + this.id + " received data with node undefined");
+        }
+        if( data.output === undefined ) {
+            throw new errors.RuntimeError("node " + this.id + " received data with output undefined");
+        }
+
+        // remove node listener
+        this.removeListener(data.node, "data");
+
+        // log incoming event
+        this.log("[EVENT] %s (state %s) RECEIVED data from %s", this.id, this.getStatusName(), data.node.id, { userOrigin: false, event: true });
+
+        // process data to this.inputValue and this.inputValid
+        if( this.isStatus(IONode.status.AWAITING_DATA) ) {
+            if( data === null ) console.log('>>> ' + this.id + ' received null data !');
+            var newValidKeys = this.validateNewKeys(data);
+
+            if(this.isReady()){
+                this.emit('ready');
+            }
+            else {
+                this.debug('%s still needs (%s) to compute', this.id, JSON.stringify(this.getInvalidInputs()), { userOrigin: false });
+            }
+        }
+        else {
+            // discard callback, no value needed (ie none wants this node output)
+            this.info("[EVENT DISCARD] discarding data event, no one is listening to this node output", { userOrigin: false });
+        }
+    }
+
+    onTrigger() {
+        // this component has been trigger
+        // emit "read" to ask for a recomputation on input DualBox nodes
+        this.log("[EVENT] %s RECEIVED trigger",this.id,  { userOrigin: false, event: true });
+
+        // should not be async, because invalidate events will come after this one is triggered
+        this.fetchMissingDataAndCompute();
+    }
+
+    // determine if the inputs required by a node are outputed by this node
+    // node: the node that want some inputs
+    // inputNames: array of inputs needed by this node
+    haveOutputToNode(node, inputNames) {
+        var keys = Object.keys(this.links.output);
+        for(var i=0; i<keys.length; i++) { // for each of our output
+            var outputList = this.links.output[keys[i]];
+
+            for(var j=0; j<outputList.length; j++) { // for each connected node/input couple
+                var o = outputList[j];
+
+                if( o.node == node && inputNames.indexOf(o.key) !== -1 ) {
+                    // one of our output is required by this node
+                    this.info("%s has output %s to node %s in %s", this.id, o.key, node.id, JSON.stringify(inputNames));
+                    return true;
+                }
+            }
+        }
+
+        this.info("%s has no output to node %s in %s", this.id, node.id, JSON.stringify(inputNames));
+        return false;
+    }
+
+    isConst( input ) {
+        return this.desc.dualbox.input[ input ]['const'] === true;
+    }
+
+    // return true if input has a default value set
+    hasDefaultValue( input ) {
+        return this.defaultValue[input] !== undefined ||
+            this.desc.dualbox.input[input]['value'] !== undefined;
+    }
+
+    // return the default input for this input key.
+    // If no default input defined, return undefined
+    getDefaultValue( input ) {
+        // check first if the app defined a default input
+        if( this.defaultValue[input] !== undefined) {
+            // WARNING : This condition is not compatible with the optimization consisting in cloning
+            // only when there is 1 receiver.
+            if( this.isConst(input) ) {
+                return this.defaultValue[input];
+            }
+            else {
+                return Type.clone( this.defaultValue[input] );
+            }
+        }
+        else {
+            // Ce code est vraiment etrange : moduleDefaultInput devrait être du JSON (je ne crois pas que ce soit instancié)
+            // Quid alors de ce clone?
+            // the application has no defined default input, check if the module has one
+            var moduleDefaultInput = this.desc.dualbox.input[input]['value'];
+            if( moduleDefaultInput !== undefined ) {
+                return Type.deserialize(moduleDefaultInput);
+            }
+            else {
+                return undefined;
+            }
+        }
+    }
+
+    validAndCloneDefaultInputs() {
+        // Set defaultInputs to valid, clone if necessary
+        var keys = Object.keys(this.inputValid);
+        for(var i=0; i<keys.length; ++i) {
+            var input = keys[i];
+            var link = this.links.input[input];
+
+            // if we have a default value and no link on this input, fetch the default value
+            if( link === null && !this.inputValid[input] ) {
+                if( this.hasDefaultInput(input) ) {
+                    this.inputValue[input] = this.getDefaultValue(input);
+                    this.inputValid[input] = true;
+                }
+                else {
+                    // Don't throw here, a value can be set by API later
+                }
+            }
+        }
+    }
+
+
+    // We received a READ message from node after us
+    // Analyze it's missing elements to determine if we should process or not
+    onRead(msg) {
+        this.info("[EVENT] %s (state %s) RECEIVED read", this.id, this.getStatusName(), { userOrigin: false, event: true });
+        if( this.haveOutputToNode(msg.node, msg.missing) ) {
+            //this.recordEventReceived("read", msg);
+            this.fetchMissingDataAndCompute();
+        }
+    }
+
+
+    /**
+     *  @return {Object.<string,Object>}
+     */
+    getDescription() {
+        return this.desc;
+    }
+
+    setDefaultInputs( inputs ){
+        if( inputs !== undefined ) {
+            var keys = Object.keys(inputs);
+            for(var k=0; k<keys.length; ++k){
+                //this.debug("Weak type checking: type=%s, val=%s", this.getInputType(keys[k]), inputs[keys[k]], { userOrigin: false });
+                Type.checkArrayThrow(this.getExtendedInputTypes(keys[k]), inputs[keys[k]]);
+                this.setDefaultInput(keys[k], inputs[keys[k]]);
+            }
+        }
+    }
+
+    getLinks() {
+        return this.links;
+    }
+
+    /**
+     *  {boolean} forceClone if true, do clone the value. If false, don't, if undefined, automatic behavior.
+     */
+    setDefaultInput( key, value, forceClone){
+        if(this.inputValid[key] === undefined){
+            throw new errors.RuntimeError("Input " + key + " is not defined in this module, cannot set");
+        }
+        else {
+            if(this.links.input[key] === null){
+                this.defaultValue[key] = value;
+                if(this.inputValue[key] !== value){
+                    //this.invalidInput(key);
+                    this.inputValue[key] = (forceClone === undefined && this.shouldCloneInputOnDefault(key)) || forceClone ? Type.clone(value) : value;
+                    this.debug("setting default value %s for input %s", value, key, { userOrigin: false });
+                    // this.invalidOutputs() is this the best place to do this?
+                }
+                else {
+                    this.debug("validating value for input %s", key, { userOrigin: false });
+                }
+                this.inputValid[key] = true; // valid if nothing branched
+            }
+            else {
+                //this.log("cannot set default input on an input with a link. Default input " + key + " ignored", { userOrigin: false });
+            }
+        }
+
+    }
+
+    removeDefaultInput(key) {
+        delete this.defaultValue[key];
+    }
+
+    /*
+     *   Set input on a node
+     */
+    setInput( key, value ) {
+        if( this.links.input[key] === null ) {
+            this.inputValue[key] = value;
+            this.inputValid[key] = true;
+        }
+    }
+
+    // for snapshot (debug.record)
+    getSnapshotValue(value) {
+        if( typeof value == "object" && value !== null ) {
+            // It's an object, log it in the record map
+            // get the main recordMap
+            var rootApp = this.getRootApp();
+            var recordMap = rootApp && rootApp.recordMap;
+            if( recordMap ) {
+                if( !recordMap[value] ) {
+                    // create a new ID
+                    var id = uuid.v4();
+                    recordMap.set(value, id);
+                    return "____dualbox_storage(" + id  + ")";
+                }
+                else {
+                    return "____dualbox_storage(" + recordMap[value]  + ")";
+                }
+            }
+            else {
+                this.warn('couldnt find main recordMap from ' + this.id + ', heavy serialization', { userOrigin: false });
+                return Type.serialize(value);
+            }
+        }
+        else {
+            // not an object, return result directly
+            return value;
+        }
+    }
+
+    getInputsData() {
+        var d = {};
+        var keys = _.keys(this.inputValid);
+        _.each(keys, (k) => {
+            d[k] = {
+                valid: this.inputValid[k]
+            }
+
+            if( d[k].valid ) {
+                d[k].value = this.getSnapshotValue( this.inputValue[k] );
+            }
+
+            if( this.hasDefaultValue(k) ) {
+                d[k].default = this.getSnapshotValue( this.getDefaultValue(k) );
+            }
+        });
+
+        return d;
+    }
+
+    getCache() {
+        if( !this.cache ) {
+            return null;
+        }
+        else {
+            var d = {};
+            _.each( this.output, (v, k) => {
+                d[k] = this.getSnapshotValue(v);
+            });
+        }
+
+        return d;
+    }
+
+    // return true if the status is in the array
+    isStatus() {
+        var args = _.toArray(arguments);
+        if( args.length == 0 ) {
+            throw new errors.ImplementationError("You must test at least 1 status");
+        }
+
+        for(var i=0; i<args.length; i++) {
+            if( this.getStatus() == args[i] ) return true;
+        }
+        return false;
+    }
+
+    // debug function
+    dump() {
+        var inspect = require('util').inspect;
+        console.log("DUMPING node state: " + this.id);
+        console.log("status: " + this.getStatusName());
+        console.log("Description: " + JSON.stringify(this.desc,null,2));
+        console.log("inputValid: " + inspect(this.inputValid));
+        console.log("inputValue: " + inspect(this.inputValue));
+    }
+
+    /**
+     *  Default implementation emit one event for all output (invalid:outut),
+     *  invalid:output is emitted first.
+     *  Can be overwritten in child if more needs to be done for invalidating.
+     *  @protected
+     */
+    invalidOutputs( newInvalidations ) {
+        if( this.canInvalidate() ){
+            if( this.desc.dualbox.output ) {
+                var keys = Object.keys(this.desc.dualbox.output);
+                this.emit('invalidate', { keys : keys });
+                this.disableInvalidate()
+            }
+        }
+        else {
+            this.log("[EVENT] skip emit of INVALIDATE, module has emitted the event already",
+                { userOrigin: false, event: true });
+        }
+    }
+
+    isInputReady(){
+        // Check inputs values
+        var keys = Object.keys(this.inputValid);
+        for(var i=0; i<keys.length; ++i){
+            if(!this.inputValid[keys[i]]){
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     *  Abstract that should be rewritten for any class that can be ready
+     *  for other reasons than inputs.
+     *  For example, Module cache is managed through this.
+     */
+    isReady(){
+        return this.isInputReady();
+    }
+
+    /**
+     *  Reset a specific input to null.
+     *  Invalidate the node.
+     *  Propagate the invalidation to subnodes.
+     *  @private
+     */
+    invalidInput( key ) {
+        if(this.inputValid[key] === undefined){
+            throw new errors.RuntimeError("Input " + key + " is not defined in this module, cannot invalid");
+        }else{
+            if( this.hasDefaultInput(key) ) {
+                throw new errors.RuntimeError(key + " is a default input value, we should not invalidate it!");
+            }
+            else {
+                this.inputValid[key] = false;
+                delete this.inputValue[key];
+                this.enableRead(); // since we cleared an input, enable read
+            }
+        }
+    }
+
+    /**
+     *  Return true if "key" is an input key of this node
+     *  @private
+     */
+    isInput( key ) {
+        var keys = Object.keys(this.inputValid);
+        for(var i=0; i<keys.length; i++) {
+            if( key == keys[i] ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    hasLinkedInput( key ) {
+        var link = this.links.input[key];
+        return link !== undefined && link !== null;
+    }
+
+    /**
+     *  Return true if "key" is an input that has a default Value.
+     *  AND has no link overwriting this default valuie.
+     *  @private
+     */
+    hasDefaultInput( key ) {
+        return !this.hasLinkedInput(key) && this.defaultValue[key] !== undefined;
+    }
+
+    /**
+     *  Reset a specific input list of inputs to null.
+     *  Invalidate the node.
+     *  Propagate the invalidation to subnodes.
+     *  returns true if inputs were invalidated
+     *  @private
+     */
+    invalidInputs( invalidKeys ) {
+        var inputsInvalidated = false;
+
+        // invalid all keys needed
+        let keys = Object.keys(this.links.input);
+        for( let i=0; i<keys.length; i++ ) {
+            var key = keys[i];
+
+            if( this.isInput(key) && !this.hasDefaultInput(key) ) {
+                if( invalidKeys.indexOf(key) !== -1 ) {
+                    this.invalidInput(key);
+                    inputsInvalidated = true;
+                }
+            }
+        }
+
+        return inputsInvalidated;
+    }
+
+    // Check if inputs are valid.
+    // - If so:  start the node computation (if it's not already started)
+    // - If not: launch a read message with the missing inputs
+    fetchMissingDataAndCompute() {
+        this.validAndCloneDefaultInputs();
+
+        if( this.isReady() ) {
+            // if node is not already evaluating, trigger the 'ready' event to start
+            // the evaluating process
+            if( !this.isEvaluating() ) {
+                // in case we were interrupted, go back to AWAITING_DATA state
+                // before we get to READY
+                this.setStatus(IONode.status.AWAITING_DATA);
+                this.emit('ready');
+            }
+        }
+        else {
+            this.setStatus(IONode.status.AWAITING_DATA);
+            if( this.canRead() ) {
+                this.emit('read', { 'node': this, 'missing' : this.getInvalidInputs() });
+                this.disableRead();
+            }
+        }
+    }
+
+    // set listeners to data events from all input of this node
+    setDataListeners() {
+        var lkeys = Object.keys(this.links["input"]);
+        for(var i=0; i<lkeys.length; ++i){
+            var inputName = lkeys[i];
+            var link = this.links["input"][inputName];
+            if( link !== null && !this.inputValid[inputName] ) {
+                link.node.on(this, 'data', this.onData.bind(this));
+            }
+        }
+    }
+
+    /*
+     *   Connect the node_from's key_from output to it's input link
+     */
+    linkInput( inputKey, node_from, key_from ) {
+        var self = this;
+
+        if(this.inputValid[inputKey] === undefined){
+            throw new errors.CompileError("Cannot add link on node " + this.id +  " on input key '" + inputKey + "', no such input exist in node " + this.id);
+        }
+        if(node_from.getOutputDescription(key_from) === undefined){
+            throw new errors.CompileError("Cannot add link on node " + this.id + " to output key '" + key_from + "', no such output exist in the origin node '" + node_from.id + "' of type " + node_from.getDescription().name);
+        }
+        if(this.links.input[inputKey] !== null){
+            throw new errors.CompileError("input '" + inputKey + "' of node '" + this.id + "' is already linked, cannot have several links for 1 input");
+        }
+        if(IONode.linkExists(node_from, key_from, this, inputKey)){
+            throw new errors.CompileError("Link between "+node_from.id+","+key_from+" and "+this.id+","+inputKey + " already exists");
+        }
+
+        var inputType  = this.getInputType(inputKey);
+        if( inputType === undefined ) {
+            throw new errors.CompileError('module ' + this.id + " of class " + this.desc.name + " has no type defined for parameter " + inputKey);
+        }
+
+        var outputType = node_from.getOutputType(key_from);
+        if( outputType === undefined ) {
+            throw new errors.CompileError('module ' + node_from.id + " of class " + node_from.desc.name + " has no type defined for output " + key_from);
+        }
+
+        var extendedInputTypes = this.getExtendedInputTypes(inputKey);
+        for(var i=0; i<extendedInputTypes.length; i++) {
+            var inputType = extendedInputTypes[i];
+
+            if( Type.typeMatch(inputType, outputType) ){
+                this.debug("Key: %s:%s(%s) is typematching output %s:%s(%s)", this.id, inputKey, inputType,
+                    node_from.id, key_from, outputType, { userOrigin: false });
+
+                // the type is matching, but it could be *
+                // resolve the type if so
+                if( inputType.indexOf("*") != -1 ) {
+                    this.debug("Setting %s:%s(%s) type from  %s:%s(%s)", this.id, inputKey, inputType,
+                        node_from.id, key_from, outputType, { userOrigin: false });
+                    this.setInputType(inputKey, outputType);
+                }
+                else if( outputType.indexOf("*") != -1 ) {
+                    this.debug("Setting %s:%s(%s) type from  %s:%s(%s)", node_from.id, key_from, outputType,
+                        this.id, inputKey, inputType, { userOrigin: false });
+                    node_from.setOutputType(key_from, inputType);
+                }
+
+                node_from.getLinks().output[key_from].push({node:this, key:inputKey});
+                this.links.input[inputKey] = {node:node_from, key:key_from};
+
+                this.log("[LINK] %s:%s --> %s:%s",  node_from.id, key_from, this.id, inputKey, { userOrigin: false });
+
+                // Invalid is synchronous.
+                node_from.on(this, 'invalidate', this.onInvalidate.bind(this));
+
+                // read is synchronous
+                this.on(node_from, 'read', node_from.onRead.bind(node_from));
+
+                // In case there was a default value, invalid it.
+                this.inputValid[inputKey] = false;
+                delete this.inputValue[inputKey];
+                return;
+            }
+        }
+
+        // if no typematch, error scenario
+        // build the right error message
+        var inputTypes = "";
+        for(var i=0; i<extendedInputTypes.length-1; i++) {
+            inputTypes += extendedInputTypes[i] + " | ";
+        }
+        inputTypes += extendedInputTypes[extendedInputTypes.length-1];
+
+        var typeInput = this.desc.dualbox.input[inputKey].type.toLowerCase();
+        if( typeInput == "*" && this.getInputType(inputKey) != "*" ) {
+            typeInput += "(" + inputTypes + ")";
+        }
+
+        var typeOutput = node_from.desc.dualbox.output[key_from].type.toLowerCase();
+        if( typeOutput == "*" && node_from.getOutputType(key_from) != "*" ) {
+            typeOutput += "(" + node_from.getOutputType(key_from) + ")";
+        }else{
+            typeOutput = node_from.getOutputType(key_from);
+        }
+
+        var linkInput = this.id + ":" + inputKey + " (" + this.desc.name + ":" + inputKey  + " of type " + typeInput + ")";
+        var linkOutput = node_from.id + ":" + key_from + " (" + node_from.desc.name + ":" + key_from + " of type " + typeOutput + ")";
+        throw new errors.TypeError("Cannot link " + linkInput + " to " + linkOutput + ": Type mismatch.");
+    }
+
+
+    /**
+     *  Init the input
+     */
+    setupInputs() {
+        var desc = this.desc;
+
+        if(desc.dualbox.input !== undefined){
+            var keys = Object.keys(desc.dualbox.input);
+            for(var i=0; i<keys.length; ++i){
+                var key = keys[i];
+
+                var type = desc.dualbox.input[key].type.toLowerCase();
+                this.inputType[key] = type;
+                var val = desc.dualbox.input[key].value;
+                if(val !== undefined){
+
+                    if(typeof val === "string" && val.search("DualBox3D") !== -1){
+                        throw "Error : DualBox3D namespace should not be used anymore";
+                    }
+
+                    this.inputValid[key] = true;
+                    try {
+                        this.defaultValue[key] = Type.loadFromJSON(val, type);
+                        this.debug("setting default value %s from package description for input %s", val, key, { userOrigin: false });
+                    }
+                    catch(e) {
+                        if( e.name == "TypeError" ) {
+                            throw new errors.TypeError("Error setting default value of " + this.id + ":" + key + ", " + e.message);
+                        }
+                        else {
+                            throw e;
+                        }
+                    }
+                    // Should we always clone here? Should we not call shouldCloneInputOnDefault ?
+                    this.inputValue[key] = Type.clone(this.defaultValue[key]);
+                } else {
+                    this.inputValid[key] = false;
+                    delete this.inputValue[key];
+                }
+                this.links.input[key] = null;
+            }
+        }
+    }
+
+    setupOutput() {
+        var desc = this.desc;
+        if(desc.dualbox.output !== undefined){
+            var keys = Object.keys(desc.dualbox.output);
+            for(var i=0; i<keys.length; ++i){
+                var key = keys[i];
+                this.links.output[key] = [];
+                this.outputType[key] = desc.dualbox.output[key].type.toLowerCase();
+            }
+        }
+    }
+
+    // clear the node after a computation.
+    // reset input, status
+    clear() {
+        var keys = Object.keys(this.inputValid);
+        for(var i=0; i<keys.length; ++i){
+            var key = keys[i];
+            var link = this.links.input[keys[i]];
+
+            // delete only the value that are not default inputs
+            if( !this.hasDefaultInput(key) || !this.isConst(key)) {
+                this.inputValid[key] = false;
+                delete this.inputValue[key];
+            }
+        }
+
+        // re-set default input (possible race condition between execution
+        // on onReady and the afterDataListener)
+        // this.validAndCloneDefaultInputs();
+
+        // enable read events since we cleared our inputs
+        this.enableRead();
+
+        // The node is now IDLE
+        this.setStatus(IONode.status.IDLE);
+    }
+
+    countOutputLinks(key){
+        return this.links.output[key].length;
+    }
+
+    getOutputNodes(key) {
+        var def = this.links.output[key];
+        var nodes = _.map(def, (d) => d.node);
+        return _.uniq(nodes);
+    }
+
+    getOriginalId() {
+        var split = this.id.split(">");
+        return split[split.length-1];
+    }
+
+    /**
+     *  Return true if and only if this node has no input links.
+     *  @return {boolean}
+     */
+    isLeaf(){
+        if( !this.links.input ) return true;
+        var res = true;
+        var keys = Object.keys(this.links.input);
+        for(var i=0; i<keys.length; ++i){
+            var link = this.links.input[keys[i]];
+            if(link !== null){
+                res = false;
+                break;
+            }
+        }
+        return res;
+    }
+
+    // should be redefined
+    stop() {
+
+    }
+
+    static linkExists( node_from, key_from, node_to, key_to ){
+        return node_from.getLinks().output[key_from].findIndex(
+            function(el){
+                return el.node===node_to && el.key === key_to;
+            }
+        ) !== -1;
+    }
+
+    /**************************************************************************
+     * Debug
+     *************************************************************************/
+
+    // Debug function to analyze the state of an application.
+    // If the application is stuck, will output the responsible nodes and dump it
+    // return true if there was missing inputs, false otherwise
+    analyzeState(spacing = 0) {
+        console.log("\xa0".repeat(spacing) + "* " + this.id + " is in state " + this.getStatusName());
+
+        if( !this.isStatus(IONode.status.IDLE, IONode.status.READY, IONode.status.COMPUTING) ) {
+            let invalidInputs = [];
+            let invalidInputLinks = [];
+
+            // check which inputs are missing
+            var keys = Object.keys(this.inputValid);
+            for(var i=0; i<keys.length; i++) {
+                var input = keys[i];
+                if( !this.inputValid[input] ) {
+                    invalidInputLinks.push( this.links.input[input] );
+                }
+            }
+
+            // recursivly launch the analysis on the missing input's nodes
+            for(var i=0; i<invalidInputLinks.length; i++) {
+                var nodeStr = invalidInputLinks[i] ?
+                    " from node " + invalidInputLinks[i].node.id + ":" + invalidInputLinks[i].key :
+                    " (no node linked)";
+                console.log("\xa0".repeat(spacing) + "- missing input " + keys[i] + nodeStr);
+                if( invalidInputLinks[i] ) {
+                    invalidInputLinks[i].node.analyzeState(spacing + 3);
+                }
+            }
+
+            return invalidInputLinks.length != 0;
+        }
+        else {
+            /*
+            // we don't want to dump output nodes, or metamodules, just the stuck nodes
+            if( this.id.indexOf("output-") != 0 || this.app !== undefined ) {
+                console.log("");
+                this.dump();
+            }
+            */
+        }
+
+        return false;
+    }
+}
+
+IONode.status = {
+    IDLE : 0,
+    COMPUTING : 1,
+    AWAITING_DATA: 2,
+    READY: 3,
+    INVALID: 4
+};
+
+IONode.statusName = {
+    0 : "IDLE",
+    1 : "COMPUTING",
+    2 : "AWAITING_DATA",
+    3 : "READY",
+};
+
+module.exports = IONode;

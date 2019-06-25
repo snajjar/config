@@ -1,0 +1,200 @@
+<template>
+    <div>
+        <a href="#" class="setValue" :data-id="n.id" :data-type="type" :data-name="property" :data-undefined="currentValue === undefined" :data-null="currentValue === null" data-valueType="dataType" :data-value="getValue()" @click="editValue">
+            <i class="fas fa-edit"></i>
+        </a>
+        <template v-if="nowEditing">
+            <template v-if="dataType === 'string'">
+                <input type="text" @blur="setStringValue" :value="currentValue"></input>
+            </template>
+            <template v-else-if="dataType === 'boolean'">
+                <select @change="setBoolValue">
+                    <option value="true" :selected="currentValue == true">True</option>
+                    <option value="false" :selected="currentValue == false">False</option>
+                </select>
+            </template>
+            <template v-else-if="dataType === 'number'">
+                <input type="number" @blur="setNumberValue" :value="currentValue"></input>
+            </template>
+            <template v-else>
+                <!-- We use the JSON editor here -->
+                <span :class="getClassName()">
+                    {{getValue()}}
+                </span>
+            </template>
+            <button class="btn btn-secondary btn-sm" title="set Null" @click="setNullValue">null</button>
+            <button v-if="type == 'input'" class="btn btn-danger btn-sm" title="delete this value" @click="deleteValue"><i class="fas fa-times"></i></button>
+        </template>
+        <template v-else>
+            <span :class="getClassName()">
+                {{getValue()}}
+            </span>
+        </template>
+    </div>
+</template>
+
+<script>
+//import { htmlentities } from '../Utils';
+
+export default {
+    props: [
+        "n",     // the node in which the value is
+        "v",     // the value
+        "type",  // the type of property the value is ("attr", "input", "default" for input/output)
+        "name",  // the name of the property in the node (undefined for "default")
+    ],
+    data: function () {
+        return {
+            "dataType": null,
+            "nowEditing": false,
+            "currentValue" : this.v,
+            "property" : this.name || "noprop",
+        };
+    },
+    created: function() {
+        this.view = window.dualboxEditor.v;
+
+        // determine datatype of the value
+        switch(this.type) {
+            case "input": this.dataType = this.n.getInputType(this.name).toLowerCase(); break;
+            case "attr" : this.dataType = this.n.getAttributeType(this.name).toLowerCase(); break;
+            default: this.dataType = "object"; break;
+        }
+
+        // for now, fallback on object datatype if not string, number or bool
+        if( this.dataType !== "string" && this.dataType !== "number" && this.dataType !== "boolean" ) {
+            this.dataType = "object";
+        }
+    },
+    mounted: function() {
+
+    },
+    updated: function() {
+        console.log('display-value updated');
+    },
+    methods: {
+        getClassName: function() {
+            return this.type + "-" + this.n.graphId + "-" + this.property;
+        },
+
+        getValue: function() {
+            if( typeof this.currentValue == "object" ) {
+                return JSON.stringify(this.currentValue);
+            }
+            else if( typeof this.currentValue == "string" ) {
+                return '"' + this.currentValue + '"';
+            }
+            else {
+                return this.currentValue;
+            }
+        },
+
+        editValue: function(e) {
+            console.log('editing (dataType: ' + this.dataType + ')');
+            this.nowEditing = true;
+        },
+
+        setValue: function(val) {
+            if( this.type == "default" ) {
+                this.n.setDefaultValue(val);
+            }
+            else {
+                if( val === undefined ) {
+                    // we can only set undefined on inputs
+                    if( this.type == "input" ) {
+                        this.n.deleteVal(this.type, this.name);
+                        this.n.setInputVisibility(this.name, true); // show the input then (connection needed)
+                    }
+                }
+                else {
+                    this.n.val( this.type, this.name, val );
+                    if( this.type == "input" ) {
+                        this.n.setInputVisibility(this.name, false); // hide inputs with values (no connection needed)
+                    }
+                }
+            }
+
+            this.currentValue = val;
+            this.nowEditing = false;
+        },
+
+        setStringValue: function(e) {
+            var val = $(e.target).val();
+            this.setValue(val);
+        },
+
+        setBoolValue: function(e) {
+            var val = $(e.target).val() == "true";
+            this.setValue(val);
+        },
+
+        setNumberValue: function(e) {
+            var val = $(e.target).val();
+            this.setValue(val);
+        },
+
+        setNullValue: function(e) {
+            this.setValue(null);
+        },
+
+        deleteValue: function(e) {
+            this.setValue(undefined);
+        },
+
+        openValueModal: function(e) {
+            /*
+            e.preventDefault();
+            e.stopPropagation();
+
+            var modal = div.find('.edit-value-modal');
+            modal.modal('show');
+
+            // set the link data on the modal
+            modal.attr('data-id', $(this).attr('data-id'));
+            modal.attr('data-type', $(this).attr('data-type'));
+            modal.attr('data-name', $(this).attr('data-name'));
+            modal.attr('data-value', $(this).attr('data-value'));
+            modal.attr('data-valueType', $(this).attr('data-valueType'));
+
+            // choose the right settings according to the link data
+            if( $(this).attr('data-undefined') ) {
+                modal.find('.unset-value').prop('checked', true);
+            }
+            else if( $(this).attr('data-null') ) {
+                modal.find('.set-value-null').prop('checked', true);
+            }
+            else {
+                modal.find('.set-value-type').prop('checked', true);
+                modal.find('.has-value').show();
+            }
+
+            var valueType = $(this).attr('data-valueType');
+            if( valueType ) {
+                modal.find('.choose-value-type').val( valueType );
+                modal.find('.define-value').hide();
+                modal.find('.define-' + valueType).show();
+
+                // set the existing value
+                var value = $(this).attr('data-value');
+                switch(valueType) {
+                case "string":
+                    val = modalSetValue.find('.text-value').val(value);
+                    break;
+                case "number":
+                    val = modalSetValue.find('.number-value').val(parseFloat(value));
+                    break;
+                case "boolean":
+                    val = modalSetValue.find('.bool-value').val(value);
+                    break;
+                case "object":
+                    val = editor.set((value && JSON.parse(value)) || {});
+                    break;
+                default:
+                    console.log('couldnt find value type: ' + valueType);
+                }
+            }
+            */
+        },
+    }
+}
+</script>

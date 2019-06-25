@@ -1,0 +1,60 @@
+const LoggerObject = require('./LoggerObject');
+const errors = require('./Errors');
+const _ = require('lodash');
+const Type = require('./Type');
+
+class Session extends LoggerObject {
+    constructor() {
+        super("Session", { userOrigin: false, logLevel: "warn" });
+        this.context = {};
+    }
+
+    // set a new variable
+    set( name, value ) {
+        this.context[name] = value;
+    }
+
+    // get a variable
+    get( name ) {
+        return this.context[name];
+    }
+
+    // return an object that behaves like a ReactiveVar.
+    // It's automatically saved to session
+    variable( name, defaultValue ) {
+        var self = this;
+        self.set( name, defaultValue );
+        return {
+            set : self.set.bind( self, name ),
+            get : self.get.bind( self, name )
+        }
+    }
+
+    // get a subsession for a private component.
+    // all variables will be prefixed by ID
+    getSubSession( id ) {
+        var self = this;
+        var prefix = id + "#";
+        return {
+            set : function( name, value ) {
+                return self.set( prefix + name, value );
+            },
+            get: function( name ) {
+                return self.get( prefix + name );
+            },
+            variable: function( name, defaultValue ) {
+                return self.variable( prefix + name, defaultValue );
+            }
+        }
+    }
+
+    export() {
+        return Type.serialize(this.context);
+    }
+
+    import( context ) {
+        this.context = Type.deserialize(context);
+    }
+}
+
+module.exports = Session;

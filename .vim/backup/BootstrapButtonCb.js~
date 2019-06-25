@@ -1,0 +1,109 @@
+import { env, UIComponent, $, Type, errors} from '@dualbox/dualbox';
+var pkgDesc = require('../package.json');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./BootstrapButtonCb.css'); // for bundle compilation
+}
+
+/**
+ *  Attributes in appDesc :
+ *  text : text of the button
+ *  id : html id
+ */
+class BootstrapButtonCb extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.val = null;
+        this.cb = null;
+        this.disable(); // disable until we have a callback set
+    }
+
+    registerEvents() {
+        super.registerEvents();
+
+        // register UI events
+        this.registerUIEvent("hide",    this.hide.bind(this));
+        this.registerUIEvent("show",    this.show.bind(this));
+        this.registerUIEvent("enable",  this.enable.bind(this));
+        this.registerUIEvent("disable", this.disable.bind(this));
+        this.registerUIEvent("setCallback", this.setCallback.bind(this));
+        this.registerUIEvent("clearValue", this.clearValue.bind(this));
+    }
+
+    setCallback(e) {
+        this.cb = e.args;
+        this.enable();
+    }
+
+    // emit data when asked
+    onReady() {
+        this.emit('data', { "result" : this.val });
+    }
+
+    import( val ) {
+        this.setValue(Type.deserialize(val));
+    }
+
+    clearValue() {
+        this.val = null;
+        this.trigger({ "result" : this.val });
+    }
+
+    // called by callback to set the value.
+    setValue( v ) {
+        this.val = v;
+        this.trigger({ "result" : this.val });
+    }
+
+    onClick(e) {
+        // Call callback when clicked
+        if( this.cb ) {
+            this.cb( this.setValue.bind(this) );
+        }
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+    }
+
+    hide(){
+        $(this.div).hide();
+    }
+
+    show(){
+        $(this.div).show();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var component = new BootstrapButtonCb(pkgDesc, appDesc, attrs);
+
+        var attr = component.attr;
+
+        var buttonHTML = attr.text ? attr.text : "Go !";
+        if( attr.glyphicon ) {
+            buttonHTML = "<i class='glyphicon " + attr.glyphicon + "'></i> " + buttonHTML;
+        }
+        if( attr.fontawesomeIcon ) {
+            buttonHTML = "<i class='fa " + attr.fontawesomeIcon + "'></i> " + buttonHTML;
+        }
+        // instanciate div from app.json parameters
+        component.div = $('<button/>', {
+                id:    appDesc.id,
+                type:  'text',
+                class: 'dualbox btn ' + attr.class + ' db-button-callback'
+            }).append(buttonHTML)
+            .click(component.onClick.bind(component))
+
+        // append to param div and return the slider
+        $(div).append(component.div);
+        return component;
+    }
+}
+
+module.exports = BootstrapButtonCb;

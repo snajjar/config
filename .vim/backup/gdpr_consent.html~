@@ -1,0 +1,58 @@
+<template name="GDPRConsent">
+    <div id="GDPRConsent" class="modal fade">
+        <div class="modal-dialog"  style="width:90%;height:95%">
+            <div class="modal-content" style="padding-left:20px;padding-right:20px">
+                <div class="modal-header"><h2>{{_ "Règlement_Européen_sur_la_Protection_des_Données"}}</h2>
+                </div>
+                <div style="padding:20px; background-image: url('/img/logo/LogoScientiFeetWaterMark.png');background-repeat: repeat; " >
+                        <p>
+                        {{_ "Nous_avons_mis_à_jour_nos_conditions_générales_conformément_à_la_réglementation_Européenne_sur_la_protection_des_données"}} <br/>
+                        {{_ "Nous_vous_remercions_de_bien_vouloir_prendre_connaissance_de_ces_nouvelles_dispositions_ici"}} <a href="https://www.scientifeet.com/accueil/mentions-legales/"> {{_ "Mentions_légales"}}</a>
+                        </p>
+                        <br/>
+                        <br/>
+                        <p>
+                            {{_ "Chez_Scientifeet_nous_utilisons_les_données_de_vos_patients_pour"}}
+                            <ul>
+                                <li>{{_ "Créer_des_semelles_orthopédiques_imprimées_en_3D"}}</li>
+                                <li>{{_ "Permettre_un_suivi_thérapeutique_complet"}}</li>
+                                <li>{{_ "Améliorer_notre_service"}}</li>
+                            </ul>
+                        </p>
+                        <p>
+                            {{_ "Nous_utilisons_vos_données_pour"}}
+                            <ul>
+                                <li>{{_ "Vous_faire_parvenir_les_paires_de_semelles_imprimées_en_3D"}}</li>
+                                <li>{{_ "Déterminez_vos_offres_et_avantages"}}</li>
+                                <li>{{_ "Animer_notre_relation_commerciale"}}</li>
+                                <li>{{_ "Améliorer_notre_service"}}</li>
+                            </ul>
+                        </p>
+
+                        {{_ "La_durée_de_conservation_des_données_est_de_1_an_après_fin_d’utilisation_de_la_plateforme"}}<br/>
+                        {{_ "Vous_et_vos_patients_bénéficiez_d’un_droit_d_accès_de_rectification_de_portabilité_d_effacement_de_celles_ci_ou_une_limitation_du_traitement"}}<br/>
+                        {{_ "Vous_et_vos_patients_pouvez_vous_opposer_au_traitement_des_données_vous_concernant_et_disposez_du_droit_de_retirer_votre_consentement_à_tout_moment_en_vous_adressant_à_product_scientifeet_com"}}<br/>
+                        {{_ "Une_section_GDPR_est_prévue_à_cet_effet_dans_la_section_votre_compte"}}
+                        {{_ "Vous_avez_la_possibilité_d_introduire_une_réclamation_auprès_d’une_autorité_de_contrôle"}} <br/>
+
+                        <br/>
+                        <br/>
+
+                        <p style="margin-left:5%;"><strong> {{getUserName}}&nbsp;&nbsp;&nbsp;&nbsp;{{_ "Date"}} : {{today 'DD/MM/YYYY HH:mm'}} {{#if getIPAddress}} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {{_ "Votre_adresse_IP"}}: {{getIPAddress}} {{/if}}</strong></p>                       
+                        <br/>
+                        <p style="margin-left:5%;"> <input type="checkbox" class="form-check-input btn-accpet-terms"/> &nbsp;&nbsp; <label> {{_ "J_accepte_l_utilisation_décrite_ci_dessus_de_mes_données_par_Podo_3D"}} </label></p><br/>
+                        <br/>
+                        <!-- <input class="form-check-input btn-accpet-obligations" type="checkbox"/> <label style="margin-left:5%;">{{_ "J_informe_mes_patients_de_l_utilisation_de_leurs_données_personnelles_ainsi_que_leur_droit_d_accès_de_rectification_de_portabilité_d_effacement_de_celles_ci_ou_une_limitation_du_traitement"}}.</label> -->
+
+                </div>
+                
+
+                <div class="modal-footer">
+                    <button disabled={{isValidateDisabled}} style="margin-right:30px" class="btn btn-success btn-validate">{{_ "Valider"}}</button>
+                    <button type="button" class="btn btn-default" data-dismiss="modal">{{_ "Plus_tard"}}</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</template>

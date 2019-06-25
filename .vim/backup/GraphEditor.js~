@@ -1,0 +1,436 @@
+import _ from 'lodash';
+
+import GraphModel from './m/GraphModel';
+import GraphView from './v/GraphView';
+import GraphController from './c/GraphController';
+import AppParser from '@dualbox/dualbox-lib-appparser';
+import jsplumbjs from 'jsplumb';
+
+//import fa from '@dualbox/dualbox-lib-fontawesome';
+// Display dependencies
+//require('@dualbox/dualbox-lib-bootstrap'); // not working yet... why?
+
+/**
+ *  Main class of the Graph Editor
+ */
+class DualboxEditor {
+    // div: selector or jquery div
+    constructor(div, attrs) {
+        this.div = $(div);
+        this.div.addClass('main-editor-div');
+        this.attrs = attrs;
+
+        this.rootAppName = attrs.name ? attrs.name : "Application";
+
+        // MVC model
+        this.m = new GraphModel(this);
+        this.v = new GraphView(this, div, attrs);
+        this.c = new GraphController(this);
+
+        // bind links
+        this.v.m = this.c.m = this.m;
+        this.v.c = this.m.c = this.c;
+        this.c.v = this.m.v = this.v;
+
+        // cache for packages
+        this.packages = {};
+
+        // the function to search for modules
+        // attr.search signature: search( text, cb )
+        // callback signature: cb( err, packages ), packages is an array of package.json
+        this.search = (text) => {
+            return new Promise((resolve, reject) => {
+                attrs.search(text, (err, packages) => {
+                    if( err ) {
+                        reject(err);
+                    }
+                    else {
+                        // cache packages in this.packages
+                        _.each(packages, (r) => {
+                            if( !this.packages[r.name] ) {
+                                this.packages[r.name] = r;
+                            }
+                        });
+
+                        this.searchResults = packages;
+                        resolve(packages);
+                    }
+                });
+            });
+        }
+        this.searchResults = null;
+
+
+        // the function to find module by name and version (with cache)
+        // signature: find( name, version ), return a Promise which, when resolved, is a package.json
+        this.loadPackage = (name, version) => {
+            version = version || "*";
+
+            return new Promise((resolve, reject) => {
+                if( name.startsWith('dualbox-core') ) {
+                    switch(name) {
+                        case "dualbox-core-if":
+                            resolve({
+                                "name": "dualbox-core-if",
+                                "version": "*",
+                                "description": "If cond is true, result is ifTrue, else result is ifFalse",
+                                "dualbox" : {
+                                    "input"  : {
+                                        "cond" : {
+                                            "type": "boolean",
+                                            "const": true
+                                        },
+                                        "ifTrue": {
+                                            "type": "*",
+                                            "const": true
+                                        },
+                                        "ifFalse": {
+                                            "type": "*",
+                                            "const": true
+                                        }
+                                    },
+                                    "output" : {
+                                        "result" : {
+                                            "type": "*"
+                                        }
+                                    }
+                                }
+                            });
+                            break;
+                        case "dualbox-core-value":
+                            resolve({
+                              "name": "dualbox-core-value",
+                              "version": "*",
+                              "description": "Simple module that transmit a value",
+                              "dualbox": {
+                                "input": {
+                                  "value": {
+                                    "type": "*",
+                                    "const": true
+                                  }
+                                },
+                                "output": {
+                                  "value": {
+                                    "type": "*"
+                                  }
+                                }
+                              }
+                            });
+                            break;
+                        case "dualbox-core-from-json":
+                            resolve({
+                              "name": "dualbox-core-from-json",
+                              "version": "*",
+                              "description": "Module that deserialize a DualBox structure saved in JSON",
+                              "dualbox": {
+                                "input": {
+                                  "json": {
+                                    "type": "json",
+                                    "const": true
+                                  }
+                                },
+                                "output": {
+                                  "res": {
+                                    "type": "*"
+                                  }
+                                }
+                              }
+                            });
+                            break;
+                        case "dualbox-core-to-json":
+                            resolve({
+                              "name": "dualbox-core-to-json",
+                              "version": "*",
+                              "description": "Module that serialize a DualBox structure to a JSON equivalent",
+                              "dualbox": {
+                                "input": {
+                                  "value": {
+                                    "type": "*",
+                                    "const": true
+                                  }
+                                },
+                                "output": {
+                                  "json": {
+                                    "type": "json"
+                                  }
+                                }
+                              }
+                            });
+                            break;
+                        case "dualbox-core-script":
+                            resolve({
+                              "name": "dualbox-core-script",
+                              "version": "*",
+                              "description": "Executes the fonction provide in attrs.script. The function takes a json as a parameter and returns a json",
+                              "dualbox": {
+                                "input": {
+                                  "json": {
+                                    "type": "json"
+                                  }
+                                },
+                                "output": {
+                                  "json": {
+                                    "type": "json"
+                                  }
+                                },
+                                "attr": {
+                                    "script" : {
+                                        "type" : "String",
+                                        "desc" : "The string of the function to be executed"
+                                    }
+                                }
+                              }
+                            });
+                            break;
+                        case "dualbox-core-switch":
+                            resolve({
+                                "name": "dualbox-core-switch",
+                                "version": "*",
+                                "description": "Resolve the condition value, then retrieve and respond with the matching value. If no match, respond with value value",
+                                "dualbox" : {
+                                    "input"  : {
+                                        "cond" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true
+                                        },
+                                        "case1" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true
+                                        },
+                                        "ifCase1": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true
+                                        },
+                                        "case2" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase2": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case3" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase3": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case4" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase4": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case5" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase5": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case6" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase6": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case7" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase7": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "case8" : {
+                                            "type": "*",
+                                            "typeLink": "condition",
+                                            "const": true,
+                                            "value": null
+                                        },
+                                        "ifCase8": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true,
+                                            "value" : null
+                                        },
+                                        "default": {
+                                            "type": "*",
+                                            "typeLink": "value",
+                                            "const": true
+                                        }
+                                    },
+                                    "output" : {
+                                        "result" : {
+                                            "type": "*",
+                                            "typeLink": "value"
+                                        }
+                                    }
+                                }
+                            });
+                            break;
+                        default:
+                            throw new Dualbox.Error("Unknown dualbox-core package: " + name);
+                    }
+                }
+
+                var loadScript = (pkg, cb) => {
+                    if( attrs.load ) {
+                        attrs.load( pkg.name, pkg.version, cb);
+                    }
+                    else {
+                        cb();
+                    }
+                }
+
+                // we need to find the package.json and make sure the script is loaded
+                if( this.packages[name] ) {
+                    loadScript(this.packages[name], (err) => {
+                        if( err ) reject(err)
+                        else resolve(this.packages[name]);
+                    });
+                }
+                else {
+                    // mark the package as beeing resolved
+                    attrs.find(name, version, (err, result) => {
+                        if( err ) {
+                            reject(err);
+                        }
+                        else {
+                            this.packages[name] = result; // cache result
+                            loadScript(this.packages[name], (err) => {
+                                if( err ) reject(err)
+                                else resolve(result);
+                            });
+                        }
+                    });
+                }
+            })
+        }
+
+        // the function to require a dualbox module
+        this.require = (name, version, cb) => {
+            return require(name); // TODO: local only for now
+        };
+
+        // export itself top window
+        window.dualboxEditor = this;
+
+        // Safety when the user leave the page,
+        // if not already defined externally
+        if(!window.onbeforeunload){
+            window.onbeforeunload = function() {
+              return "Unsaved changes will be lost, are you sure you want to leave the editor?";
+            }
+        }
+
+        this.loadCorePackages();
+
+        if( attrs.json ) {
+            this.onReady(() => {
+                var p = this.setApp(attrs.json);
+                if( attrs.onLoaded ) {
+                    p.then(attrs.onLoaded);
+                }
+            });
+        }
+    }
+
+    // call cb when the editor is initialized
+    onReady(cb) {
+        this.v.onReady(cb);
+    }
+
+    loadCorePackages() {
+        var onError = function(err) {
+            console.error(err);
+        }
+
+        this.loadPackage('@dualbox/dualbox').catch(onError);
+        this.loadPackage('dualbox-core-if').catch(onError);
+        this.loadPackage('dualbox-core-value').catch(onError);
+        this.loadPackage('dualbox-core-from-json').catch(onError);
+        this.loadPackage('dualbox-core-to-json').catch(onError);
+        this.loadPackage('dualbox-core-script').catch(onError);
+        this.loadPackage('dualbox-core-switch').catch(onError);
+    }
+
+    setApp(json) {
+        return this.c.load(json);
+    }
+
+    getApp() {
+        this.m.get();
+    }
+
+    // load all packages needed in the json
+    // return a Promise
+    loadPackages(json) {
+        var promises = []; // array of promises
+
+        var parser = new AppParser(json);
+        parser.eachPackage((name, version) => {
+            promises.push( this.loadPackage(name, version) );
+        });
+
+        // also load core nodes
+        promises.push( this.loadPackage('dualbox-core-if', '*') );
+        promises.push( this.loadPackage('dualbox-core-value', '*') );
+        promises.push( this.loadPackage('dualbox-core-from-json', '*') );
+        promises.push( this.loadPackage('dualbox-core-to-json', '*') );
+        promises.push( this.loadPackage('dualbox-core-script', '*') );
+        promises.push( this.loadPackage('dualbox-core-switch', '*') );
+
+        return Promise.all(promises);
+    }
+
+    // sync version of this.loadPackage. Will crash if the package has not been loaded yet
+    getPackage(name, version) {
+        if( this.packages[name] === undefined ) throw "Package " + name + " has not been loaded yet.";
+        return this.packages[name];
+    };
+}
+
+// try to export in window if in browser context
+try {
+    window.DualboxEditor = DualboxEditor;
+}
+catch(e) {
+    console.log('Could not export to window: ' + e);
+}
+
+//export default DualboxEditor;

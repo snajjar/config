@@ -1,0 +1,173 @@
+var getModifiers = function(modifiers, userId) {
+    modifiers = modifiers || {};
+    if( !isAdmin(userId) ) {
+        modifiers.ownerId = userId;
+    }
+    return modifiers;
+}
+
+var getOptions = function(opt) {
+    return opt || {};
+}
+
+publishUserCollection = function( col ) {
+    var name = col._name;
+
+    // 1 item subscription (by id)
+    Meteor.publish(name + "_by_id", function(docId) {
+        return col.find({ '_id' : docId});
+    });
+
+    // 1 item subscription (by name)
+    Meteor.publish(name + "_by_name", function(name) {
+        return col.find({ 'name' : name});
+    });
+
+    // multiple items subscription (user-owned)
+    Meteor.publish('user_' + name, function(mod, opt) {
+        var modifiers = getModifiers(mod, this.userId);
+        modifiers.ownerId = this.userId;
+        var options   = getOptions(opt);
+        return col.find( modifiers, options );
+    });
+
+    // multiple items subscription (all items)
+    Meteor.publish('all_' + name, function(mod, opt) {
+        var modifiers = getModifiers(mod, this.userId);
+        var options   = getOptions(opt);
+        return isAdmin(this.userId) ? col.find( modifiers, options ) : [];
+    });
+
+    // selective subscription
+    Meteor.publish('select_' + name, function(mod, opt) {
+        var modifiers = getModifiers(mod, this.userId);
+        var options   = getOptions(opt);
+        return col.find( modifiers, options );
+    });
+
+    // counter (user-owned)
+    Meteor.publish('user_' + name + 'Count', function(mod, opt) {
+        return new Counter('user_' + name, col.find({ 'ownerId': this.userId }));
+    });
+
+    // counter (all items)
+    Meteor.publish('all_' + name + 'Count', function(mod, opt) {
+        return new Counter('all_' + name, isAdmin(this.userId) ? col.find() : []);
+    });
+
+    // counter (selective)
+    Meteor.publish('select_' + name + 'Count', function(mod, opt) {
+        var modifiers = getModifiers(mod, this.userId);
+        var options   = getOptions(opt);
+        return new Counter('select_' + name, col.find(modifiers, options));
+    });
+}
+
+publishGlobalCollection = function( col ) {
+    var name = col._name;
+
+    // 1 item subscription (by id)
+    Meteor.publish(name + "_by_id", function(docId, opt) {
+        var options = getOptions(opt);
+        return col.find({ '_id' : docId }, options);
+    });
+
+    // multiple items subscription (all items)
+    Meteor.publish('all_' + name, function(mod, opt) {
+        mod = mod || {};
+        var options   = getOptions(opt);
+        console.log(name+'.find(' + JSON.stringify(mod) + "," + JSON.stringify(options) + ")");
+        return col.find( mod, options );
+    });
+
+    // selective subscription
+    Meteor.publish('select_' + name, function(mod, opt) {
+        mod = mod || {};
+        var options   = getOptions(opt);
+        return col.find( mod, options );
+    });
+
+    // counter (all items)
+    Meteor.publish('all_' + name + 'Count', function(mod, opt) {
+        return new Counter('all_' + name, col.find());
+    });
+
+    // counter (selective)
+    Meteor.publish('select_' + name + 'Count', function(mod, opt) {
+        mod = mod || {};
+        var options = getOptions(opt);
+        return new Counter('select_' + name, col.find(mod, options));
+    });
+}
+
+var autopublish = function() {
+    // publish with no subscription is an auto-subscribe for the client
+    Meteor.publish(null, function() {
+        if( this.userId ) {
+            return [
+                Configs.find(),
+                Meteor.users.find({ _id: this.userId }, {
+                    fields: {
+                        "emails": 1,
+                        "profile": 1,
+                        "roles": 1,
+                        "validated": 1,
+                        "createdAt" : 1,
+                        "VATIntracomm" : 1,
+                        "VATPolicy" : 1,
+                        "VAT" : 1,
+                        "billingAddress" : 1,
+                        "plan" : 1,
+                    }
+                })
+            ]
+        }
+        else {
+            return [ Configs.find() ];
+        }
+    });
+}
+
+publishData = function() {
+    autopublish(); // data that doesn't require subs
+    publishUserCollection( Meteor.users );
+
+    publishUserCollection( Apps );
+    publishUserCollection( AppVersions );
+
+    publishUserCollection( InstanciationsDay );
+    publishUserCollection( InstanciationsWeek );
+    publishUserCollection( InstanciationsMonth );
+
+    publishUserCollection( Notifications );
+    publishUserCollection( Invoices );
+
+    publishGlobalCollection( PackagesVersions );
+    publishGlobalCollection( Packages );
+
+    // Search through packages
+    Meteor.publish( 'PackageSearch', function( search ) {
+        if( search !== null && search !== undefined && typeof search !== "string" ) {
+            throw new Meteor.Error("Search must be a string, null or undefined");
+        }
+
+        let query      = {},
+            projection = { limit: 10, sort: { title: 1 } };
+
+        if ( search ) {
+          let regex = new RegExp( search, 'i' );
+
+          query = {
+            $or: [
+              { "name": regex },
+              { "lastVersion.versionNumber": regex },
+              { "lastVersion.description": regex }
+            ]
+          };
+
+          projection.limit = 100;
+        }
+
+        return Packages.find( query, projection );
+    });
+}

@@ -1,0 +1,88 @@
+import { $, env, UIComponent } from '@dualbox/dualbox';
+var pkgDesc = require('../package.json');
+
+if( env.browser ) {
+    require('@dualbox/dualbox-lib-bootstrap');  // require bootstrap to work
+    require('./ExampleInOutUI.css'); // for bundle compilation
+}
+
+/**
+ *  This example ui shows how to work with ui which have both an input and an output.
+ *  In this example, the text box will return the text entered by the user, with a prefix
+ *  defined by an input.
+ *  The prefix can be set with setDefaultInput, or more useful in most cases, linked to
+ *  an application output.
+ *
+ */
+class ExampleInOutUI extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.val = "";
+        this.div = null;
+
+        this.attr = appDesc.attr ? appDesc.attr : {};
+    }
+
+    onReady() {
+        if(!this.inputValid["prefix"]){
+            throw "Error : that should never happen, on ready called and inputs not valid...?";
+        }else{
+            // Here we update the inout preview before sending the new value.
+            this.inputValue["prefix"];
+            $('#'+this.attr.id+"-prefix").text("Prefix: "+this.inputValue["prefix"]);
+        }
+
+        if(this.val === "" && this.attr.emptyValue){
+            this.emit('data', { "result" : this.inputValue["prefix"]+this.attr.emptyValue });
+        }else{
+            this.emit('data', { "result" : this.inputValue["prefix"]+this.val });
+        }
+    }
+
+    disable() {
+        $(this.div).prop('disabled', true);
+    }
+
+    enable() {
+        $(this.div).prop('disabled', false);
+    }
+
+    onKeyUp(e) {
+        if(this.val !== $(this.div).find('input').val()){
+            this.val = $(this.div).find('input').val();
+            this.trigger( { result:this.val } );
+        }
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        // build slider from package.json desc
+        var component = new ExampleInOutUI(pkgDesc, appDesc, attrs);
+
+        // instanciate div from app.json parameters
+        component.div =
+            $('<div/>', { class : "dualbox form-group" }).append(
+                $('<label/>', { class : "dualbox" }).append(
+                    $('<span/>', { class : "dualbox", text: appDesc.attr.label + ": " })
+                ),
+                $('<input/>', {
+                    id:    appDesc.attr.id,
+                    type:  'text',
+                    class: 'dualbox form-control',
+                    value: appDesc.attr.value,
+                    maxlength : appDesc.attr.maxlength !== undefined ? appDesc.attr.maxlength : 25
+                })//.change(component.onChange.bind(component)) // bind onChange
+                .keyup(component.onKeyUp.bind(component)), // bind onKeyUp,
+                $('<span/>',{
+                    id:appDesc.attr.id+"-prefix",
+                    class:'dualbox',
+                    text:"Prefix: "
+                })
+            );
+
+        // append to param div and return the slider
+        $(div).append(component.div);
+        return component;
+    }
+}
+
+module.exports = ExampleInOutUI;

@@ -1,0 +1,114 @@
+// Resolve env first
+exports.env = require('./Env');
+
+// import babel polyfill
+if( exports.env.browser ) {
+    if( window && window.DualBox ) {
+        if( !window.DualBox.polyfilled ) {
+            window.DualBox.polyfilled = true;
+            require('@babel/polyfill');
+        }
+    }
+}
+
+// Resolve version
+exports.version = require('../../package.json').version;
+
+// API exports
+exports.LoggerObject = require('./LoggerObject');
+
+var Type = require('./Type');
+exports.Type = Type;
+exports.registerType = Type.registerType.bind(Type);
+exports.registerEnumerateType = Type.registerEnumerateType.bind(Type);
+Type.init();
+
+exports.TranslateApp = require('./TranslateApp');
+exports.App = require('./App');
+exports.errors = require('./Errors');
+
+// nodes exports
+exports.Module = require('./nodes/LoopModule');
+exports.UIComponent = require('./nodes/UIComponent');
+exports.Widget3D = require('./nodes/Widget3D');
+exports.Widget3DCamera = require('./nodes/Widget3DCamera');
+
+// utils exports
+exports.localStorage = require('localStorage');
+exports.sessionStorage = require('sessionstorage');
+
+// export core packages definition
+exports.core = {
+    "FromJson" : require('./nodes/core/FromJson.json'),
+    "ToJson" : require('./nodes/core/ToJson.json'),
+    "Script" : require('./nodes/core/Script.json'),
+    "Switch" : require('./nodes/core/Switch.json'),
+    "If" : require('./nodes/core/If.json'),
+    "Value" : require('./nodes/core/Value.json'),
+}
+
+// Convenience: place some functions directly into the DualBox namespace
+var envKeys = Object.keys(exports.env);
+for(var i=0; i<envKeys.length; i++) {
+    var fn = envKeys[i];
+    exports[fn] = exports.env[fn];
+}
+
+// Function to start DualBox
+// attrs.translations : the dictionnary for translation
+// attrs.lang : the language for translation
+exports.start = function(attrs) {
+    var app = null;
+    attrs = attrs || {};
+
+    exports.setTheme(attrs.theme || "dark");
+    exports.setLogLevel(attrs.logLevel || "warn");
+    exports.setProfiler(attrs.profiler || false);
+    exports.setUI(attrs.ui || {});
+    exports.setDiv(attrs.div || false);
+    exports.setLogOptions(attrs.logOptions || { codeLocation: false, fileLocation: false });
+    exports.setOptions(attrs.options || { noVersionCheck : true });
+
+    if( exports.env.browser ) {
+        // if div is set to false, we instanciate with no UI
+        // otherwise, it we go with UI
+        if( attrs.div === undefined ) {
+            throw "You must provide the 'div' argument to instanciate the DualBox interface";
+        }
+
+        // if running in a web page
+        if( attrs.json ) {
+            // check if the user provided json code
+            var appJson = attrs.json;
+        }
+        else {
+            // else: require app.json from the bundle
+            var p = process.cwd() == "/" ? "" : process.cwd() + "/";
+            var appJson = require(p + 'app.json');
+        }
+        appJson = exports.TranslateApp(appJson, attrs.translations ? attrs.translations : {}, attrs.lang ? attrs.lang : "en");
+        app = new exports.App(appJson);
+
+        // consume instanceData if it exists
+        if( window && window.DualBox && window.DualBox.instanceData ) {
+            app.instanceData = window.DualBox.instanceData;
+            delete window.DualBox.instanceData;
+        }
+    }
+    else {
+        // running in node
+        // Maybe we should find a way to get the json from the app script in node too
+        // require('app.json') only works in browser (investigate browserify on why, probably
+        // that the require() method is not overwritten then
+        if( attrs.json ) {
+            app = new exports.App(attrs.json);
+        }
+        else {
+            console.error('To run an app bundle in node, please provide the corresponding json parameter');
+        }
+    }
+
+    return app;
+}
+
+exports.require = require; // export browserify require function

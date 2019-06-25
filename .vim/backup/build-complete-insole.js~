@@ -1,0 +1,105 @@
+var description = require('./package.json');
+var DualBox = require('@dualbox/dualbox');
+var podo3d = require('@dualbox/dualbox-lib-scientifeet-podo3d');
+
+var DualBoxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+const ImageData = require('@dualbox/dualbox-type-imagedata');
+
+/**
+ *  This module will analyze 3 points positionned on a mesh to determine which one is
+ *  heel, meta1 and meta5.
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var BuildCompleteInsole = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.setParallel(false);
+};
+
+BuildCompleteInsole.prototype = Object.create(DualBox.Module.prototype);
+BuildCompleteInsole.prototype.constructor = BuildCompleteInsole;
+
+// [Abstract] See DualBox.Module
+BuildCompleteInsole.prototype.compute = function(input, response){
+    this.debug( "Computing output of BuildCompleteInsole" );
+
+    // Unmap txtzones and patZones since podo3d code has notr been built using javascript Map
+    // Use classic object instead
+
+    var txtzones = DualBox.Type.map2obj(input.txtzones);
+    var patZones = DualBox.Type.map2obj(input.patZones);
+    var soleRefPts = DualBox.Type.map2obj(input.soleRefPts);
+    var adjustRefPts = DualBox.Type.map2obj(input.soleRefPts);
+    var footRefPts = DualBox.Type.map2obj(input.footRefPts);
+
+    Object.keys(adjustRefPts).forEach(function(key){
+        adjustRefPts[key] = adjustRefPts[key].clone().applyMatrix4(input.matrix);
+    });
+
+    var arch = {
+        meshPattern:null,
+        height:0
+    };
+
+    console.profile("buildCompleteInsole " + this.id);
+    var res = podo3d.buildCompleteInsole(
+        input.pattern,
+        patZones,
+        input.recessHole,
+        input.patContour,
+        input.patContourCover,
+        soleRefPts,
+        adjustRefPts, //adjusted_pts,
+        input.footscan,
+        input.footsize,
+        input.footwidth,
+        input.footside,
+        footRefPts,
+        {
+            productionId:{
+                zone:txtzones['txt_production_id'],
+                text:input.productionId,
+                img_data: input.prodIdImgData,
+                letter_params:{
+                    w:3.8,
+                    h:5.45,
+                    d:2
+                },
+                border_offset:0.5
+            },
+            thickness:input.thickness,
+            frontThickness:input.frontThickness,
+            recessThickness:1,
+            patientInit:{
+                zone:txtzones['txt_initiales'],
+                text:input.initials,
+                img_data:input.initialsImgData,
+                letter_params:{
+                    w: 3.6,
+                    h: 5.16,
+                    d: 2
+                },
+                border_offset:0
+            }
+        },
+        input.antero,
+        input.element,
+        input.flatheel,
+        input.coverframe === null ? null : input.coverframe.get(),
+        input.matrix
+    );
+    console.profileEnd("buildCompleteInsole" + this.id);
+
+    var output = {
+        insole:res.result,
+        border:res.border,
+        heelHeight:res.heelHeight,
+        archextHeight:res.archextHeight,
+        hmap:res.hmap
+    };
+
+    response.send(output);
+};
+
+module.exports = BuildCompleteInsole;
+

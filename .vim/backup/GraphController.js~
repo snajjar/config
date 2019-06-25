@@ -1,0 +1,648 @@
+/**
+ *   Implementing the Controller of the MVC
+ *   Every change in the application starts here.
+ */
+
+import _ from 'lodash';
+import utils from '../m/DualboxUtils';
+import swal from 'sweetalert2';
+import Merger from '../m/Merger';
+import idx from 'idx';
+import AppParser from '@dualbox/dualbox-lib-appparser';
+
+class GraphController {
+    constructor(editor) {
+        this.e = editor;
+        this.m = editor.m;
+        this.v = editor.v;
+    }
+
+    createId(name) {
+        var shortName = utils.shortName(name);
+        return shortName + '-' + utils.randomString(8);
+    }
+
+    // Add a node from the search results
+    addNewBox(packageName) {
+        // first, make sure the package is loaded
+        this.e.loadPackage(packageName).then(() => {
+            var id   = this.createId(packageName);
+            var pkg  = null;
+
+            // close the modal
+            this.v.div.find('.add-node-modal').modal('toggle');
+
+            // add the node
+            var pkg = _.find(this.e.searchResults, { 'name': packageName });
+            if( pkg ) {
+                // first, add node in the model
+                var nodeAdded = this.m.addNode(id, pkg);
+                if( nodeAdded ) {
+                    // if model accepts the operation, add it to the view
+                    this.v.addNode(id, pkg);
+
+                    // if the node is an UI, we also need to add it to a panel
+                    var n = this.m.getNode(id);
+                    if( n.isUI() ) {
+                        if( n.isWidget() ) {
+                            var options = {};
+                            var registerTargets = n.m.getSpecialUINodes( n.getRegisterType() );
+                            _.each(registerTargets, (n) => options[n.graphId] = n.graphId );
+
+                            swal({
+                                title: 'Select a registration target',
+                                text: 'You just added a Widget node. It must be registered to an element of type ' + n.getRegisterType() +
+                                    " to work. Please choose one on the following list.",
+                                input: 'select',
+                                inputOptions: options
+                            }).then( (result) => {
+                                if( result.value ) {
+                                    // register the widget
+                                    this.registerWidget(n.id, result.value);
+
+                                    // find the panel of the target and put the widget on the same panel
+                                    var panel = this.m.getNode(result.value).getPanel();
+                                    this.m.addNodeToPanel(n.id, panel);
+
+                                    this.v.repaint();
+                                }
+                            });
+                        }
+                        else {
+                            var options = {};
+                            _.each(this.m.getPanels(), (name) => options[name] = name );
+
+                            swal({
+                                title: 'Select a panel',
+                                text: 'You just added an UI. Please select in which panel of the app we should locate it.',
+                                input: 'select',
+                                inputOptions: options
+                            }).then( (result) => {
+                                if( result.value ) {
+                                    this.m.addNodeToPanel(id, result.value);
+                                    this.v.repaint();
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            else {
+                console.error('Package ' + packageName + ' not found');
+            }
+        });
+    }
+
+    // create a new metabox
+    addNewMetabox(name, json = {}) {
+        if( this.m.hasMetanode(name) ) {
+            swal("Can't add metabox", "metabox with name '" + name + "' already exists.", "error");
+        }
+        else {
+            // add metabox def
+            this.m.addMetanode(name, json);
+
+            // add 1 node of this metabox on the graph
+            var id = this.createId(name);
+
+            this.m.addNode(id, {
+                "name" : name,
+                "version" : "*"
+            });
+
+            // repaint editor
+            this.v.repaint();
+        }
+    }
+
+    // remove a box from it's id
+    removeBox(id) {
+        this.m.getNode(id).remove();
+        this.v.repaint();
+    }
+
+    duplicateBox(id) {
+        // copy def
+        var node = this.m.getNode(id);
+        var type = node.type;
+        var def = _.cloneDeep(node.getDef());
+        var newId = this.createId(def.module);
+
+        // remove links, change position a little bit
+        delete def.links;
+        var leftPosition = idx(def, o=>o.graph.position.left);
+        if( leftPosition ) {
+            def.graph.position.left = (parseInt(leftPosition) + 200).toString();
+        }
+        def.id = newId;
+
+        this.m.addNodeFromDef(newId, type, def);
+        this.v.repaint();
+    }
+
+    setInputVisibility(id, input, visible) {
+        var node = this.m.getNode(id);
+        if( node.isInputConnected(input) && !visible ) {
+            swal('Not yet', 'Please remove all connections to this input before changing its visibility', 'error');
+            return false;
+        }
+        else {
+            node.setInputVisibility(input, visible);
+            this.v.repaint();
+            return true;
+        }
+    }
+
+    setOutputVisibility(id, output, visible) {
+        var node = this.m.getNode(id);
+        if( node.isOutputConnected(output) && !visible ) {
+            swal('Not yet', 'Please remove all connections to this output before changing its visibility', 'error');
+            return false;
+        }
+        else {
+            node.setOutputVisibility(output, visible);
+            this.v.repaint();
+            return true;
+        }
+    }
+
+    setComment(id, comment) {
+        var node = this.m.getNode(id);
+        node.setComment(comment);
+        this.v.repaint();
+        this.v.openBoxSettings(id);
+    }
+
+    deleteComment(id) {
+        var node = this.m.getNode(id);
+        node.deleteComment();
+        this.v.repaint();
+        this.v.openBoxSettings(id);
+    }
+
+    registerWidget(id, targetId) {
+        var node = this.m.getNode(id);
+        node.registerWidget(targetId);
+    }
+
+    renameBox(oldId, newId, type) {
+        if( newId == "length" ) {
+            // crash jsPlumb to have a div named "length"
+            swal("Forbidden name", "Sorry, this is a forbidden name", "error");
+            return;
+        }
+
+        // newId can't start with a number
+        if( newId.match(/^\d/) ) {
+            swal("Wrong name", "You can't set a name that starts with a number.", "error");
+            return;
+        }
+
+        if( oldId !== newId ) {
+            if( type == "input" ) {
+                oldId = this.m.inputPrefix + oldId;
+                newId = this.m.inputPrefix + newId;
+            }
+            else if( type == "output" ) {
+                oldId = this.m.outputPrefix + oldId;
+                newId = this.m.outputPrefix + newId;
+            }
+            else {
+                if( newId.startsWith(this.m.inputPrefix) ||
+                    newId.startsWith(this.m.outputPrefix) ) {
+                    swal('Breaking convention', 'Only input boxes and output boxes can have a name that starts with "' + this.m.inputPrefix + '" or "' + this.m.outputPrefix + '".', "error");
+                    return;
+                }
+            }
+            this.m.getNode(oldId).rename(newId);
+            this.v.repaint();
+        }
+        this.v.openBoxSettings(newId);
+    }
+
+    addAppEvent(name) {
+        this.m.getCurrentApp().addAppEvent(name);
+        this.v.setMainMenu();
+    }
+
+    removeEvent(id, index) {
+        this.m.getNode(id).removeEvent(index);
+        this.v.repaint();
+        this.v.openBoxSettings(id);
+    }
+
+    removeAppEvent(name) {
+        this.m.getCurrentApp().removeAppEvent(name);
+        this.v.repaint();
+        this.v.setMainMenu();
+    }
+
+    renameAppEvent(oldName, newName) {
+        this.m.getCurrentApp().renameAppEvent(oldName, newName);
+        this.v.repaint();
+        this.v.setMainMenu();
+    }
+
+    setEventProperty(id, index, prop, val) {
+        if( id.startsWith("#application-events-in") ) {
+            var eventName = id.split('-')[ id.split('-').length -1 ];
+            var def = this.m.getCurrentApp().getEventIn(eventName)[index];
+            def[prop] = val;
+        }
+        else if( id.startsWith("#application-events-out") ) {
+            var def = this.m.getCurrentApp().getEventOut();
+            def[prop] = val;
+        }
+        else {
+            var def = this.m.getNode(id).getEvent(index);
+            def[prop] = val;
+            this.m.getNode(id).setEvent(index, def);
+        }
+
+        this.v.repaint();
+    }
+
+    setEventIf(id, index, val) {
+        this.setEventProperty(id, index, "if", val);
+    }
+
+    setEventData(id, index, val) {
+        this.setEventProperty(id, index, "data", val);
+    }
+
+    setEventTarget(id, index, val) {
+        this.setEventProperty(id, index, "node", val);
+    }
+
+    setEventName(id, index, val) {
+        this.setEventProperty(id, index, "event", val);
+    }
+
+    setBoxCache(id, val) {
+        var n = this.m.getNode(id).setCache(val);
+        this.v.repaint();
+    }
+
+    setBoxParallel(id, val) {
+        var n = this.m.getNode(id).setParallel(val);
+        this.v.repaint();
+    }
+
+    setAppDescription( desc ) {
+        this.m.getCurrentApp().setDescription(desc);
+        this.v.setMainMenu();
+    }
+
+    setAppEventDescription( name, desc ) {
+        this.m.getCurrentApp().setEventDescription(name, desc);
+        this.v.setMainMenu();
+    }
+
+    removeAppInEvent(name, index) {
+        this.m.getCurrentApp().removeAppInEvent(name, index);
+        this.v.setMainMenu();
+    }
+
+    removeAppOutEvent(name) {
+        this.m.getCurrentApp().removeAppOutEvent(name);
+        this.v.setMainMenu();
+    }
+
+    getFirstNodeWithEvents() {
+        var nodes = this.m.getNodes('ui');
+        for(var i=0; i<nodes.length; i++) {
+            var node = nodes[i];
+            if( node.getEventsNames().length !== 0 ) {
+                return node;
+            }
+        }
+
+        return null;
+    }
+
+    addEvent(id, name) {
+        var node = this.getFirstNodeWithEvents();
+        if( node != null ) {
+            var evtName = node.getEventsNames()[0];
+            this.m.addEventLink(id, node.id, evtName);
+        }
+        else {
+            this.m.addEventLink(id, null, null);
+        }
+
+        this.v.openBoxSettings(id);
+    }
+
+    addSubEvent(name) {
+        var node = this.getFirstNodeWithEvents();
+        if( node != null ) {
+            var evtName = node.getEventsNames()[0];
+            this.m.getCurrentApp().addSubEvent(name, node.getGraphId(), evtName);
+        }
+        else {
+            this.m.getCurrentApp().addSubEvent(name, null, null);
+        }
+        this.v.setMainMenu();
+    }
+
+    addCallback(name) {
+        this.m.getCurrentApp().addCallback(name);
+        this.v.setMainMenu();
+    }
+
+    // create a new input in the current window (metanode)
+    createInput() {
+        swal.mixin({
+            confirmButtonText: 'Next &rarr;',
+            showCancelButton: true,
+            progressSteps: ['1', '2', '3']
+        }).queue([
+            {
+                input: 'text',
+                title: 'Enter the input name',
+            },
+            {
+                input: 'text',
+                title: 'Enter the input type',
+            },
+            {
+                input: 'text',
+                title: 'Enter a description',
+            }
+        ]).then(async (result) => {
+            if( result.value ) {
+                const [ inputName, inputType, inputDesc ] = result.value;
+                var input = this.m.addInput(inputName, inputType, inputDesc);
+                this.v.repaint();
+            }
+        });
+    }
+
+    // create a new output in the current window (metanode)
+    createOutput() {
+        swal.mixin({
+            confirmButtonText: 'Next &rarr;',
+            showCancelButton: true,
+            progressSteps: ['1', '2', '3']
+        }).queue([
+            {
+                input: 'text',
+                title: 'Enter the output name',
+            },
+            {
+                input: 'text',
+                title: 'Enter the output type',
+            },
+            {
+                input: 'text',
+                title: 'Enter a description',
+            }
+        ]).then(async (result) => {
+            if( result.value ) {
+                const [ outputName, outputType, outputDesc ] = result.value;
+                var output = this.m.addOutput(outputName, outputType, outputDesc);
+                this.v.repaint();
+            }
+        });
+    }
+
+    // create a new input, determine the type from the connection
+    createInputFromConnection(id, name) {
+        swal.mixin({
+            confirmButtonText: 'Next &rarr;',
+            showCancelButton: true,
+            progressSteps: ['1', '2']
+        }).queue([
+            {
+                input: 'text',
+                title: 'Enter the input name',
+            },
+            {
+                input: 'text',
+                title: 'Enter a description',
+            }
+        ]).then(async (result) => {
+            if( result.value ) {
+                var inputName = result.value[0];
+                var inputDesc = result.value[1];
+                var inputType = await this.m.getNode(id).getInputType(name);
+
+                // add the input
+                var input = this.m.addInput(inputName, inputType, inputDesc);
+
+                // make the position a bit to the left
+                var pos = _.clone(this.m.getNode(id).getDef().graph.position);
+                pos.left = parseInt(pos.left) > 150 ? parseInt(pos.left) - 150 : 0;
+                input.graph = {};
+                input.graph.position = pos;
+
+                // add the connection
+                this.m.addDataLink("input", inputName, id, name);
+
+                this.v.repaint();
+            }
+        });
+    }
+
+    // create a new output, determine the type from the connection
+    createOutputFromConnection(id, name) {
+        swal.mixin({
+            confirmButtonText: 'Next &rarr;',
+            showCancelButton: true,
+            progressSteps: ['1', '2']
+        }).queue([
+            {
+                input: 'text',
+                title: 'Enter the output name',
+            },
+            {
+                input: 'text',
+                title: 'Enter a description',
+            }
+        ]).then(async (result) => {
+            if( result.value ) {
+                var outputName = result.value[0];
+                var outputDesc = result.value[1];
+                var outputType = await this.m.getNode(id).getOutputType(name);
+
+                // add the output
+                var output = this.m.addOutput(outputName, outputType, outputDesc);
+
+                // make the position a bit to the left
+                var pos = _.clone(this.m.getNode(id).getDef().graph.position);
+                pos.left = parseInt(pos.left) + 250;
+                output.graph = {};
+                output.graph.position = pos;
+
+                // add the connection
+                this.m.addDataLink(id, name, "output", outputName);
+
+                this.v.repaint();
+            }
+        });
+    }
+
+    setIterator(id, input) {
+        var node = this.m.getNode(id);
+        node.detachInput(input); // this connection is invalid now
+        node.setIterator(input);
+        this.v.repaint();
+    }
+
+    unsetIterator(id, input) {
+        var node = this.m.getNode(id);
+        node.detachInput(input);  // this connection is invalid now
+        node.unsetIterator(input);
+        this.v.repaint();
+    }
+
+    setFeedback(id, output, input) {
+        this.m.getNode(id).setFeedback(output, input);
+        this.v.repaint();
+    }
+
+    unsetFeedback(id, output) {
+        this.m.getNode(id).setFeedback(output);
+        this.v.repaint();
+    }
+
+    setMetanodeDescription(nodeId, description) {
+        var node = this.m.getNode(nodeId);
+        var metanodeName = node.def.module;
+        this.m.getCurrentApp().json.metanodes[metanodeName].description = description;
+        this.v.openBoxSettings(nodeId);
+    }
+
+    // enter inside a metanode
+    enterMetanode(nodeId) {
+        (async () => {
+            // 1 - hide the canvas
+            await this.v.hideCanvas();
+
+            // 2 - Save the actual position/zoom state
+            var viewState = this.v.zoomer.saveState();
+
+            // 3 - Enter the metanode
+            this.m.enterMetanode(nodeId, viewState);
+
+            // 4 - Repaint
+            await this.v.repaint();
+
+            // 5 - Zoom back to 1, position to top-left
+            await this.v.zoomer.setZoom(1);
+            await this.v.translater.gotoTopLeft();
+
+            // 6 - Show the canvas back again
+            await this.v.showCanvas();
+        })();
+    }
+
+    // exit to the given window
+    setWindow( w ) {
+        this.m.setWindow(w[0]);
+        this.v.repaint().then(() => {
+            this.v.zoomer.restoreState(w[2]);
+        });
+    }
+
+    load( json ) {
+        // first load the packages
+        return this.e.loadPackages(json).then( async () => {
+            console.log('LOADED ALL PACKAGES !');
+
+            // hold state saving for now
+            this.m.history.holdSaving(true);
+
+            // 1st, load the json in the model
+            await this.m.load(json);
+
+            // set the new app's menu
+            this.v.setMainMenu();
+
+            // then, repaint
+            this.v.repaint().then(() => {
+                this.m.history.holdSaving(false);
+                this.m.history.save();
+            });
+
+            // load the css into the css editor
+            this.v.cssCode.setValue(this.m.get().css || "");
+
+            // load the html templates into the html editor
+            this.v.div.find('.app-interface-select').empty();
+            this.v.div.find('.app-interface-select').append(
+                $("<option/>", { "value" : "" }).append('Load UI...')
+            );
+            _.each(this.m.get().interface, (val, uiName) => {
+                this.v.div.find(".app-interface-select").append(
+                    $("<option/>", { "value" : uiName }).append(uiName)
+                );
+            });
+        }).catch((err) => {
+            console.error(err);
+        });
+    }
+
+    get() {
+        return this.m.get();
+    }
+
+    undo() {
+        this.m.undo();
+        this.v.repaint();
+    }
+
+    redo() {
+        this.m.redo();
+        this.v.repaint();
+    }
+
+    deleteSelection() {
+        var selectedDivs = this.v.selector.getSelection();
+        _.each(selectedDivs, (div) => {
+            this.m.getNode( $(div).attr('id') ).remove();
+        });
+        this.v.repaint();
+    }
+
+    mergeSelection() {
+        swal.mixin({
+            confirmButtonText: 'Next &rarr;',
+            showCancelButton: true,
+            progressSteps: ['1', '2']
+        }).queue([
+            {
+                input: 'text',
+                title: 'Enter the metabox name',
+            },
+            {
+                input: 'text',
+                title: 'Enter the metabox description',
+            }
+        ]).then(async (result) => {
+            if( result.value ) {
+                var mName = result.value[0];
+                var mDesc = result.value[1];
+
+                var selectedDivs = this.v.selector.getSelection();
+                var ids = [];
+                _.each(selectedDivs, (div) => {
+                    if( div.is('.card') ) { // filter cards only
+                        ids.push( $(div).attr('id') );
+                    }
+                });
+
+                var merger = new Merger(this.m, ids);
+                merger.merge(mName, mDesc);
+
+                this.v.repaint();
+            }
+        });
+    }
+
+    removeSplit(id) {
+
+    }
+}
+
+export default GraphController;

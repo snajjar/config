@@ -1,0 +1,2184 @@
+/**
+ *   Implementing the Model of the GraphEditor
+ *   Everything related to Dualbox Intelligence and validation should be here
+ */
+import History from './History';
+import AppParser  from '@dualbox/dualbox-lib-appparser';
+import utils from './DualboxUtils';
+import _ from 'lodash';
+import idx from 'idx';
+import swal from 'sweetalert2';
+
+class GraphModel {
+    constructor(editor) {
+        this.e = editor;
+
+        // the internal structure
+        this.data = {
+            root:  {
+                modules : {},
+                input : {},
+                output : {},
+                metanodes : {},
+                ui : {},
+                events : {},
+                css : "",
+                interface : {},
+                dependencies : {},
+                libs: {}
+            },
+
+            // Pointer that changes when we view/edit metanodes
+            // All methodes are relative to this pointer, so we just need to change it
+            // to enter/exit a metanode
+            app : null,
+
+            // Array of pointers to manage navigation between metanodes
+            windows : null
+        };
+        this.data.app = this.data.root;
+        this.data.windows = [[ this.e.rootAppName, this.data.app ]];
+
+        // An object to save/restore different states of this.data (ctrl-z/ctrl-y)
+        this.history = new History(this);
+        this.history.save();
+
+        this.inputPrefix = "in-";
+        this.outputPrefix = "out-";
+    }
+
+    /***
+     *   JSON Import/Export
+     */
+
+    async load( json ) {
+        this.check(json);
+
+        this.data.root = json;
+        this.data.app = this.data.root; // reset ptr
+        this.data.windows = [[ this.e.rootAppName, this.data.app ]];
+
+        await this.addNativeTypes();
+
+        this.history.save();
+    }
+
+    addNativeTypes() {
+        var natives = [
+            "@dualbox/dualbox-type-number",
+            "@dualbox/dualbox-type-boolean",
+            "@dualbox/dualbox-type-string",
+            "@dualbox/dualbox-type-array",
+            "@dualbox/dualbox-type-object",
+            "@dualbox/dualbox-type-buffer",
+            "@dualbox/dualbox-type-map",
+            "@dualbox/dualbox-type-json",
+            "@dualbox/dualbox-type-regexp",
+            "@dualbox/dualbox-type-nativearray",
+        ];
+
+        var promises = [];
+        _.each(natives, (pkgName) => {
+            promises.push( new Promise((resolve, reject) => {
+                this.e.loadPackage(pkgName).then((pkg) => {
+                    if( !idx(this.data.root, o=>o.libs[pkgName]) ) {
+                        this.data.root.libs = this.data.root.libs || {};
+                        this.data.root.libs[pkgName] = pkg.version;
+                    }
+                    resolve();
+                }).catch((e) => {
+                    console.error('Could not load package ' + pkgName + ': ' + e);
+                });
+            }));
+        });
+
+        return Promise.all(promises);
+    }
+
+    get() {
+        return this.data.root;
+    }
+
+    getCurrentApp(readOnly = false) {
+        return new Application( this, this.getCurrentMetanode(), this.getCurrentMetanodeName(), readOnly);
+    }
+
+    getCurrentMetanode() {
+        return this.data.app;
+    }
+
+    getCurrentMetanodeName() {
+        var windows = this.data.windows;
+        return windows[ windows.length-1 ][0];
+    }
+
+    getCurrentMetanodePath() {
+        var windows = this.data.windows;
+        var names = [];
+        for(var i=0; i<windows.length; i++) {
+            names.push( windows[i][0] );
+        }
+        return names.join('->');
+    }
+
+    getTypes() {
+        var libs = _.cloneDeep(this.data.root.libs);
+        libs = _.filter(_.keys(libs), l => l.startsWith('@dualbox/dualbox-type') );
+
+        // now require Dualbox, then all the types, and extract the list from DualBox.Type.types
+        var DualBox = require('@dualbox/dualbox');
+        for(var i=0; i<libs.length; i++) { // use for loop to require in the same context as DualBox object
+            require(libs[i]);
+        }
+
+        return _.cloneDeep(DualBox.Type.types);
+    }
+
+    // return a editor-compatible json version of the app
+    // - remove the web workers
+    getEditorCompatibleJson() {
+        var json = _.cloneDeep(this.data.root);
+        var parser = new AppParser(json);
+        parser.eachModule((json, id) => {
+            if( json.parallel ) {
+                json.parallel = false;
+            }
+        });
+
+        if( json.snapshot == true ) {
+            parser.eachNode((json, id) => {
+                delete json.snapshot;
+            });
+            json.snapshot = false;
+        }
+
+        return json;
+    }
+
+    getCleanJson() {
+        var json = _.cloneDeep(this.data.root);
+        var parser = new AppParser(json);
+        console.log('Getting clean json');
+        parser.eachNode((json, id) => {
+            delete json.snapshot;
+        });
+        parser.eachMetanode((json) => {
+            delete json.snapshot;
+        });
+        delete json.snapshot;
+        delete json.snapshotObjects;
+
+        return json;
+    }
+
+    getWindows() {
+        return this.data.windows;
+    }
+
+    getCurrentWindow() {
+        return this.data.app;
+    }
+
+    getPanels() {
+        return _.keys(this.data.root.interface);
+    }
+
+    setWindow(name) {
+        var newWindows = [];
+        _.each(this.data.windows, (w) => {
+            newWindows.push(w);
+            if( w[0] === name ) {
+                this.data.app = w[1];
+                return false; // end of loop
+            }
+        });
+
+        this.data.windows = newWindows;
+        this.history.save();
+    }
+
+    // performs some checks on the json
+    check( json ) {
+        var parser = new AppParser(json);
+        var nbErrors = 0;
+        parser.eachInput((json, id) => {
+            if( _.keys(json.events).length !== 0 ) {
+                console.error("Input " + id + " has events but shouldnt");
+                nbErrors++;
+            }
+        });
+        parser.eachOutput((json, id) => {
+            if( _.keys(json.events).length !== 0 ) {
+                console.error("Output " + id + " has events but shouldnt");
+                nbErrors++;
+            }
+        });
+        parser.eachModule((json, id) => {
+            if( _.keys(json.events).length !== 0 ) {
+                console.error("Module " + id + " has events but shouldnt");
+                nbErrors++;
+            }
+        });
+        if( nbErrors ) {
+            swal("Errors found!", nbErrors + " errors found while parsing the loaded app. Please check console.", "error");
+            throw nbErrors + " errors found while parsing the loaded app";
+        }
+        return json;
+    }
+
+    /**
+     *   Json security methods
+     */
+    ensure( field ) {
+        this.data.app[field] = this.data.app[field] || {};
+    }
+
+    /**
+     *   Metanodes navigation
+     */
+    enterMetanode(id, savedZoom) {
+        var node = this.data.app.modules[id];
+        if( !node ) {
+            throw "couldn't find node " + id;
+        }
+
+        var name = node.module;
+        var metanode = this.data.app.metanodes[name];
+        if( !metanode ) {
+            throw "couldn't find definition for metanode " + name;
+        }
+
+        // save current zoom and position in the current window
+        this.data.windows[ this.data.windows.length - 1 ][2] = savedZoom;
+
+        // switch to the next window
+        this.data.app = metanode;
+        this.data.windows.push([ name, metanode ]);
+        this.history.save();
+    }
+
+    /***
+     *   Dualbox model
+     */
+    addMetanode(name, def) {
+        this.ensure('metanodes');
+        this.data.app.metanodes[name] = def;
+    }
+
+    addInput(name, type, desc) {
+        var input = {
+            "type": type,
+            "desc": desc
+        };
+        this.ensure('input');
+        this.data.app.input[name] = input;
+        this.history.save();
+        return input;
+    }
+
+    addOutput(name, type, desc) {
+        var output = {
+            "type": type,
+            "desc": desc
+        };
+        this.ensure('output');
+        this.data.app.output[name] = output;
+        this.history.save();
+        return output;
+    }
+
+    hasMetanode(name) {
+        return idx(this.data, o=>o.app.metanodes[name]) !== undefined;
+    }
+
+    isRootApp( app ) {
+        return this.data.root == app;
+    }
+
+    getMetanodeInstances( app ) {
+        // first identify metanode name
+        var metanodeName = null;
+        _.each(this.data.app.metanodes, (metanode, name) => {
+            if( app == metanode ) {
+                metanodeName = name;
+                return false;
+            }
+        });
+
+        var instances = [];
+        _.each(this.data.app.modules, (json, id) => {
+            if( json.module == metanodeName ) {
+                instances.push( this.getNode(id) );
+            }
+        });
+
+        return instances;
+    }
+
+    addNode(id, pkg) {
+        console.log('adding node: ' + id);
+
+        var desc = {
+            "module" : pkg.name,
+            "version": pkg.version || "*",
+            "id"     : id
+        }
+        if( utils.isModule( pkg.name ) ) {
+            this.ensure('modules');
+            if( this.data.app.modules[id] ) {
+                console.error('Could not add module ' + id + ': already exists');
+                return false;
+            }
+            var node = this.data.app.modules[id] = desc;
+        }
+        else if( utils.isUI( pkg.name ) ) {
+            this.ensure('ui');
+            if( this.data.app.ui[id] ) {
+                console.error('Could not add ui ' + id + ': already exists');
+                return false;
+            }
+            var node = this.data.app.ui[id] = desc;
+        }
+        else {
+            // may be a metanode
+            var nodeDef = idx(this.data.app, o => o.metanodes[pkg.name]);
+            if( nodeDef ) {
+                this.ensure('modules');
+                var node = this.data.app.modules[id] = desc;
+                return node;
+            }
+            else {
+                throw pkg.name + " is not module or ui, can't add node !";
+            }
+        }
+
+        this.history.save();
+        return node;
+    }
+
+    addNodeToPanel(id, panelName) {
+        var panel = this.data.root.interface[panelName];
+        if( !panel ) {
+            throw "Panel " + panelName + " doesn't exist in the application";
+        }
+
+        if( !panel.children ) panel.children = [];
+        panel.children.push({
+            "type": "Element",
+            "tagName": "div",
+            "attributes": {
+                "className": [
+                    "dualbox",
+                    "dualbox-component"
+                ],
+                "dataset": {
+                    "node": id
+                },
+                "style": {
+                    "width": "auto",
+                    "height": "auto"
+                }
+            },
+            "children": []
+        });
+    }
+
+    addNodeFromDef(id, type, def) {
+        switch( type ) {
+        case "module":
+            this.ensure('modules');
+            this.data.app.modules[id] = def;
+            break;
+        case "ui":
+            this.ensure('ui');
+            this.data.app.ui[id] = def;
+            break;
+        default:
+            throw type + " is not module or ui, error";
+        }
+    }
+
+    addDataLink( sourceId, sourceOutput, targetId, targetInput ) {
+        var link = new DataLink(this, sourceId, sourceOutput, targetId, targetInput);
+        link.attach();
+        this.history.save();
+        return true;
+    }
+
+    removeDataLink( sourceId, sourceOutput, targetId, targetInput ) {
+        var link = new DataLink(this, sourceId, sourceOutput, targetId, targetInput);
+        link.detach();
+        this.history.save();
+        return true;
+    }
+
+    getDataLink( sourceId, sourceOutput, targetId, targetInput ) {
+        return new DataLink(this, sourceId, sourceOutput, targetId, targetInput);
+    }
+
+    addEventLink( sourceId, targetId, eventName ) {
+        var link = new EventLink(this, sourceId, targetId, eventName);
+        link.attach();
+        this.history.save();
+        return true;
+    }
+
+    removeEventLink( sourceId, targetId, eventName ) {
+        var link = new EventLink(this, sourceId, targetId, eventName);
+        link.detach();
+        this.history.save();
+        return true;
+    }
+
+    getEventLink( sourceId, targetId, eventName ) {
+        return new EventLink(this, sourceId, targetId, eventName);
+    }
+
+    // check if metanode def is used by at least 1 module
+    isMetanodeUsed( name ) {
+        var stillUsed = false;
+        _.each(this.data.app.modules, (n) => {
+            if( n.module === name ) {
+                stillUsed = true;
+                return false; // eol
+            }
+        });
+        return stillUsed;
+    }
+
+
+    /***
+     *  Helpers
+     */
+    undo() {
+        this.history.undo();
+    }
+
+    redo() {
+        this.history.redo();
+    }
+
+    getNode(id, example=false) {
+        return new GraphNode(this, id);
+    }
+
+    getNodes( type ) {
+        var keys = null;
+        switch(type) {
+            case "input":
+                keys = _.keys( this.data.app.input );
+                keys = _.map(keys, k => this.inputPrefix + k);
+                break;
+            case "output":
+                keys = _.keys( this.data.app.output );
+                keys = _.map(keys, k => this.outputPrefix + k);
+                break;
+            case "modules":
+                keys = _.keys( this.data.app.modules );
+                break;
+            case "ui":
+                keys = _.keys( this.data.app.ui );
+                break;
+            default:
+                if( type === undefined ) {
+                    keys = [].concat( _.map(_.keys(this.data.app.input), k=>this.inputPrefix+k) )
+                             .concat( _.map(_.keys(this.data.app.output), k=>this.outputPrefix+k) )
+                             .concat( _.keys(this.data.app.modules) )
+                             .concat( _.keys(this.data.app.ui) );
+                }
+                else {
+                    throw new Error('unknown node type: ' + type);
+                }
+        }
+
+        var nodes = [];
+        _.each(keys, (k) => {
+            nodes.push( this.getNode(k) );
+        });
+        return nodes;
+    }
+
+    getSpecialUINodes( type ) {
+        var specialNodes = [];
+        var nodes = this.getNodes('ui');
+        _.each(nodes, (n) => {
+            if( n.getSpecialType() == type ) {
+                specialNodes.push(n);
+            }
+        });
+        return specialNodes;
+    }
+
+    createExampleNode(pkgName, id) {
+        return this.getNode(id);
+        /*
+        var model = _.cloneDeep(this);
+
+        try {
+            return model.getNode(id);
+        }
+        catch(e) {
+            model.addNode(id, this.e.getPackage(pkgName));
+            return model.getNode(id);
+        }
+        */
+    }
+
+
+    compareTypes(t1, t2) {
+        t1 = t1.toLowerCase();
+        t2 = t2.toLowerCase();
+        var deepCompare = function(t1,t2){
+            if(t1 === t2 || t1==="*" || t2==="*"){
+                return true;
+            } else if(t1.search("array<") === 0 && t2.search("array<") === 0) {
+                return deepCompare(t1.slice(6,t1.length-1), t2.slice(6,t2.length-1));
+            } else if(t1.search("map<string,") === 0 && t2.search("map<string,") === 0) {
+                return deepCompare(t1.slice(11,t1.length-1), t2.slice(11,t2.length-1));
+            } else {
+                return false;
+            }
+        }
+
+        return deepCompare(t1, t2);
+    }
+
+    prefixId( id, type ) {
+        if( type == "input" && !id.startsWith('in-') ) {
+            return this.inputPrefix + id;
+        }
+        else if( type == "output" && !id.startsWith('out-') ) {
+            return this.outputPrefix + id;
+        }
+        else {
+            return id;
+        }
+    }
+
+    getSnapshotValue( v ) {
+        if( typeof v == "string" && v.startsWith('____dualbox_storage') ) {
+            var id = v.replace("____dualbox_storage(", "").slice(0, -1);
+            return this.data.root.snapshotObjects[id];
+        }
+        else {
+            return v;
+        }
+    }
+}
+
+
+/***
+ *   Class to gather all utility functions for a node
+ */
+class GraphNode {
+    constructor(m, id) {
+        this.m = m;
+        this.app = this.m.data.app;
+        this.id = id;
+        this.uniqId = this.m.getCurrentMetanodePath() + '->' + this.id;
+
+        if( id.startsWith(this.m.inputPrefix) ) {
+            this.type = "input";
+            this.graphId = id.substring(3); // the id to identify it in the dualbox graph
+            this.def = this.app.input[this.graphId];
+        }
+        else if( id.startsWith(this.m.outputPrefix) ) {
+            this.type = "output";
+            this.graphId = id.substring(4);
+            this.def = this.app.output[this.graphId];
+        }
+        else if(this.app.modules && this.app.modules[id]) {
+            this.graphId = id;
+            this.type = "module";
+            this.def  = this.app.modules[this.graphId];
+        }
+        else if(this.app.ui && this.app.ui[id]) {
+            this.graphId = id;
+            this.type = "ui";
+            this.def  = this.app.ui[this.graphId];
+        }
+        else {
+            throw "Cant find node " + id;
+        }
+    }
+
+    getUniqId() {
+        return this.uniqId; // TODO: change this to include full path
+    }
+
+    /***
+     *   Getters
+     */
+
+    hasSnapshot() {
+        return this.def.snapshot !== undefined;
+    }
+
+    getSnapshot() {
+        return this.def.snapshot;
+    }
+
+    isSnapshotStatus( status ) {
+        return this.def.snapshot.state.status == status;
+    }
+
+    getGraphId() {
+        return this.graphId;
+    }
+
+    getPackageName() {
+        if( this.isInput() ) return "input (" + this.getType() + ")";
+        else if( this.isOutput() ) return "output (" + this.getType() + ")";
+        else if( this.isUI() ) return "UI (" + utils.shortName(this.getPackage().name) + ")";
+        else if( this.isMetanode() ) return "Metabox (" + utils.shortName(this.getPackage().name) + ")";
+        else return "Module (" + utils.shortName(this.getPackage().name) + ")";
+    }
+
+    // ONLY VALID for input/output nodes
+    getType() {
+        if( !this.isInput() && !this.isOutput() ) throw this.id + " is not a I/O node...";
+        return this.def.type;
+    }
+
+    // return the input links for a node
+    getNormalizeLinksDef() {
+        return this.type == "input" || this.type == "output" ?
+            { "value" : this.def.link } :
+            this.def.links;
+    }
+
+    // return the app definition of the node
+    getDef() {
+        return this.def;
+    }
+
+    getInputDef(input) {
+        var pkg = this.getPackage();
+        return idx(pkg, o => o.dualbox.input[input]);
+    }
+
+    getInputDesc(input) {
+        var pkg = this.getPackage();
+        return idx(pkg, o => o.dualbox.input[input].desc);
+    }
+
+    getOutputDesc(output) {
+        var pkg = this.getPackage();
+        return idx(pkg, o => o.dualbox.output[output].desc);
+    }
+
+    // return the package/metanode description
+    getPackage() {
+        if( this.isMetanode() ) {
+            var def = this.app.metanodes[this.def.module];
+            if( def === undefined ) {
+                throw id + " is not a metanode";
+            }
+
+            var r = {
+                name: this.def.module,
+                version: "*",
+                description: def.description,
+                dualbox: {
+                    input: def.input,
+                    output: def.output,
+                }
+            }
+            return r;
+        }
+        else {
+            switch(this.type) {
+            case "input":
+            case "output":
+                return this.m.e.getPackage('dualbox-core-value');
+            default: // "module", "ui"
+                return this.m.e.getPackage(this.def.module);
+            }
+        }
+    }
+
+    getInputType(inputName) {
+        if( (this.isInput() || this.isOutput()) && inputName == "value" ) {
+            return this.getType();
+        }
+        else {
+            var pkg = this.getPackage();
+            var type = pkg && pkg.dualbox && pkg.dualbox.input && pkg.dualbox.input[inputName] && pkg.dualbox.input[inputName].type || "*";
+            return this.hasIterator(inputName) ? "Array<"+type+">" : type;
+        }
+    }
+
+    hasInputDesc(inputName) {
+        return this.getInputDesc(inputName) !== "";
+    }
+
+    getInputDesc(inputName) {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.input && pkg.dualbox.input[inputName] && pkg.dualbox.input[inputName].desc || "";
+    }
+
+    // only if this.isInput() == true
+    getDefaultValue() {
+        return this.def.value;
+    }
+
+    // only if this.isInput() == true
+    setDefaultValue(v) {
+        this.def.value = v;
+    }
+
+    // only if this.isInput() == true, or this.isOutput() == true
+    getDescription() {
+        if( this.def.desc ) {
+            return this.def.desc;
+        }
+        else {
+            var pkg = this.getPackage();
+            return pkg && pkg.description;
+        }
+    }
+
+    getInputDefaultValue(inputName) {
+        var pkg = this.getPackage();
+        var pkgDefault = pkg && pkg.dualbox && pkg.dualbox.input && pkg.dualbox.input[inputName] && pkg.dualbox.input[inputName].value;
+        var appDefault = this.def.defaultInputs && this.def.defaultInputs[inputName];
+
+        if( appDefault !== undefined ) { return appDefault; }
+        else if( pkgDefault !== undefined ) { return pkgDefault; }
+        else return undefined;
+    }
+
+    setInputDefaultValue(inputName, val) {
+        this.def.defaultInputs = this.def.defaultInputs || {};
+        this.def.defaultInputs[inputName] = val;
+    }
+
+    hasDefaultValue(inputName) {
+        var pkg = this.getPackage();
+        var pkgDefault = pkg && pkg.dualbox && pkg.dualbox.input && pkg.dualbox.input[inputName] && pkg.dualbox.input[inputName].value;
+        var appDefault = this.def.defaultInputs && this.def.defaultInputs[inputName];
+        return appDefault !== undefined || pkgDefault !== undefined;
+    }
+
+    getOutputType(outputName) {
+        if( (this.isInput() || this.isOutput()) && outputName == "value" ) {
+            return this.getType();
+        }
+        else {
+            var pkg = this.getPackage();
+            var type = idx(pkg, o => o.dualbox.output[outputName].type) || "*";
+            if( this.hasLoop() ) {
+                // if this output is not a feedback, "arrayize" it
+                return this.hasFeedback(outputName) ? type : "Array<" + type + ">";
+            }
+            else {
+                return type;
+            }
+        }
+    }
+
+    getOutputDesc(outputName) {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.output && pkg.dualbox.output[outputName] && pkg.dualbox.output[outputName].desc || "";
+    }
+
+    hasOutputDesc(outputName) {
+        return this.getOutputDesc(outputName) !== "";
+    }
+
+    getAttributeDesc( attrName ) {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.attr && pkg.dualbox.attr[attrName] && pkg.dualbox.attr[attrName].desc || "";
+    }
+
+    hasAttributeDesc( attrName ) {
+        return this.getAttributeDesc(attrName) !== "";
+    }
+
+    getAttributeType( attrName ) {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.output && pkg.dualbox.attr[attrName] && pkg.dualbox.attr[attrName].type || "*";
+    }
+
+    hasAttributeValue( attrName ) {
+        var pkg = this.getPackage();
+        var pkgDefault = pkg && pkg.dualbox && pkg.dualbox.attr && pkg.dualbox.attr[attrName].value;
+        var appDefault = this.def.attr && this.def.attr[attrName];
+        return appDefault !== undefined || pkgDefault !== undefined;
+    }
+
+    getAttributeValue( attrName ) {
+        var pkg = this.getPackage();
+        var pkgDefault = pkg && pkg.dualbox && pkg.dualbox.attr && pkg.dualbox.attr[attrName].value;
+        var appDefault = this.def.attr && this.def.attr[attrName];
+        if( appDefault !== undefined ) { return appDefault; }
+        else if( pkgDefault !== undefined ) { return pkgDefault; }
+        else return undefined;
+    }
+
+    setAttributeValue( attrName, val ) {
+        this.def.attr = this.def.attr || {};
+        this.def.attr[attrName] = val;
+    }
+
+    // only if this.isUI() == true
+    // return true if the UI exists in a panel, false otherwise
+    isOnAPanel() {
+        return this.getPanel() !== undefined;
+    }
+
+    // only if this.isUI() == true
+    // return the panel where the UI is placed
+    getPanel() {
+        var parser = new AppParser(this.m.data.root);
+        return parser.findNodePanel(this.id);
+    }
+
+    // srcType: "input" or "attr"
+    val( srcType, name, val ) {
+        if( val === undefined ) {
+            // it's a get
+            if( srcType === "input" ) {
+                return this.getInputDefaultValue(name);
+            }
+            else if( srcType === "attr" ) {
+                return this.getAttributeValue(name);
+            }
+        }
+        else {
+            // it's a set
+            if( srcType === "input" ) {
+                return this.setInputDefaultValue(name, val);
+            }
+            else if( srcType === "attr" ) {
+                return this.setAttributeValue(name, val);
+            }
+        }
+    }
+
+    deleteVal(srcType, name){
+        if( srcType === "input" && this.def.defaultInputs){
+            delete this.def.defaultInputs[name];
+        }else if( srcType === "attr" && this.def.attr){
+            delete this.def.attr[name];
+        }
+    }
+
+    getValueType( srcType, name ) {
+        if( srcType === "input" ) {
+            return this.getInputType(name);
+        }
+        else if( srcType === "attr" ) {
+            return this.getAttributeType(name);
+        }
+    }
+
+    hasLoop() {
+        var r = false;
+        _.each( this.getInputsNames(), (inputName) => {
+            if( this.hasIterator(inputName) ) {
+                r = true;
+                return false;
+            }
+        });
+        return r;
+    }
+
+    // true if input has an iterator
+    hasIterator( inputName ) {
+        var r = false;
+        _.each(this.def.loops, (loop) => {
+            if( loop.iterators && loop.iterators[inputName] ) {
+                r = true;
+                return false; // eol
+            }
+        });
+        return r;
+    }
+
+    // true if output has feedback
+    hasFeedback( outputName ) {
+        return this.getFeedback( outputName ) !== null;
+    }
+
+    // get the feedback input for this output
+    getFeedback( outputName ) {
+        var r = null;
+        _.each(this.def.loops, (loop) => {
+            if( loop.feedback && loop.feedback[outputName] ) {
+                r = loop.feedback[outputName];
+                return false; // eol
+            }
+        });
+        return r;
+    }
+
+    isFeedbackTarget( inputName ) {
+        var r = false;
+        _.each(this.def.loops, (loop) => {
+            _.each( loop.feedback, (v, k) => {
+                if( v === inputName ) {
+                    r = true;
+                }
+            });
+        });
+        return r;
+    }
+
+    setIterator(input) {
+        this.def.loops = this.def.loops || [];
+        this.def.loops[0] = this.def.loops[0] || {};
+        this.def.loops[0]["iterators"] = this.def.loops[0]["iterators"] || {};
+        this.def.loops[0]["iterators"][input] = 1;
+    }
+
+    unsetIterator(input) {
+        delete this.def.loops[0]["iterators"][input];
+        if( _.isEmpty(this.def.loops[0]["iterators"])) delete this.def.loops[0]["iterators"];
+        if( _.isEmpty(this.def.loops[0])) delete this.def.loops;
+    }
+
+    setFeedback(output, input) {
+        this.def.loops = this.def.loops || [];
+        this.def.loops[0] = this.def.loops[0] || {};
+        this.def.loops[0]["feedback"] = this.def.loops[0]["feedback"] || {};
+        this.def.loops[0]["feedback"][output] = input;
+    }
+
+    unsetFeedback(output) {
+        delete this.def.loops[0]["feedback"][output];
+        if( _.isEmpty(this.def.loops[0]["feedback"])) delete this.def.loops[0]["feedback"];
+        if( _.isEmpty(this.def.loops[0])) delete this.def.loops[0];
+        if( _.isEmpty(this.def.loops)) delete this.def.loops;
+    }
+
+    isMetanode() {
+        return this.getMetanodeDefinition() !== undefined;
+    }
+
+    getMetanodeDefinition() {
+        return idx(this.app, o => o.metanodes[this.def.module]);
+    }
+
+    isUI() {
+        return this.type == "ui";
+    }
+
+    isModule() {
+        return this.type == "module";
+    }
+
+    isInput() {
+        return this.type == "input";
+    }
+
+    isOutput() {
+        return this.type == "output";
+    }
+
+    isWidget() {
+        return this.isUI() && this.getSpecialType() == "Widget";
+    }
+
+    getRegisterType() {
+        return this.getPackage().dualbox.registerTo;
+    }
+
+    // return "Widget", "Canvas3D" or any other special type
+    getSpecialType() {
+        return this.getPackage().dualbox.type;
+    }
+
+    // only if this.isWidget() == true
+    registerWidget( targetId ) {
+        if( !this.def.registerTo ) this.def.registerTo = {};
+        this.def.registerTo = targetId;
+    }
+
+    getWidgetRegistration() {
+        return this.def.registerTo;
+    }
+
+
+    hasCacheActivated() {
+        return idx(this.getDef(), o => o.cache) == true;
+    }
+
+    isParallel() {
+        return idx(this.getDef(), o => o.parallel) == true;
+    }
+
+    setCache(b) {
+        this.def.cache = b;
+    }
+
+    setParallel(b) {
+        this.def.parallel = b;
+    }
+
+    getInputsNames() {
+        return _.keys( idx(this.getPackage(), o => o.dualbox.input) );
+    }
+
+    getOutputsNames() {
+        return _.keys( idx(this.getPackage(), o => o.dualbox.output) );
+    }
+
+    getAttributesNames() {
+        return _.keys( idx(this.getPackage(), o => o.dualbox.attr) );
+    }
+
+    getEventsNames() {
+        return _.keys( idx(this.getPackage(), o => o.dualbox.events) );
+    }
+
+    // return the list of nodes that can be targeted by an event
+    getEventTargets() {
+
+    }
+
+    getOutboundEvents() {
+        return this.def.events || [];
+    }
+
+    getInputDef( name ) {
+        return idx(this.getPackage(), o => o.dualbox.input[name]);
+    }
+
+    getOutputDef( name ) {
+        return idx(this.getPackage(), o => o.dualbox.output[name]);
+    }
+
+    getAttrDef( name ) {
+        return idx(this.getPackage(), o => o.dualbox.attr[name]);
+    }
+
+    getEventDef( name ) {
+        return idx(this.getPackage(), o => o.dualbox.events[name]);
+    }
+
+    hasInputs() {
+        return this.getInputsNames().length > 0;
+    }
+
+    hasOutputs() {
+        return this.getOutputsNames().length > 0;
+    }
+
+    hasAttributes() {
+        return this.getAttributesNames().length > 0;
+    }
+
+    hasInEvents() {
+        return this.getEventsNames().length > 0;
+    }
+
+    hasOutEvents() {
+        var evts = idx(this, o => o.def.events);
+        return evts && evts.length !== 0;
+    }
+
+    isInputConst(name) {
+        var desc = this.getInputDef(name);
+        if( !desc ) {
+            throw "Input " + name + " not found in node " + this.id;
+        }
+
+        var type = desc.type.toLowerCase();
+        switch( type ) {
+            case "number":
+            case "boolean":
+                return true;
+            default:
+                return desc.const;
+        }
+    }
+
+    isInputVisible(inputName) {
+        if( this.isInput() || this.isOutput() ) {
+            return true;
+        }
+        else {
+            if( this.isInputConnected(inputName) ) {
+                return true;
+            }
+            else {
+                var val = idx(this.def, o => o.graph.in.visible[inputName]);
+                if( val !== undefined ) {
+                    return val !== false;
+                }
+                else {
+                    // check if the app did set a default value for this input
+                    var defaultVal = idx(this.def, o => o.defaultInputs[inputName]);
+                    if( defaultVal !== undefined ) {
+                        return false; // make not visible when default value is set by the app
+                    }
+
+                    // else, make the input visible if the package didnt define a default value for it
+                    var pkg = this.getPackage();
+                    var pkgDef = idx(pkg, o => o.dualbox.input[inputName]);
+                    if( pkgDef ) {
+                        if( pkgDef.visible === false ) {
+                            return false;
+                        }
+                        else if( pkgDef.value !== undefined ) {
+                            return false;
+                        }
+                        else {
+                            return true;
+                        }
+                    }
+                    else {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    isOutputVisible(outputName) {
+        if( this.isInput() || this.isOutput() ) {
+            return true;
+        }
+        else {
+            if( this.isOutputConnected(outputName) ) {
+                return true;
+            }
+            else {
+                var val = idx(this.def, o => o.graph.out.visible[outputName]);
+                if( val === false ) {
+                    return false;
+                }
+                else {
+                    var pkg = this.getPackage();
+                    var pkgDef = idx(pkg, o => o.dualbox.output[outputName]);
+                    return pkgDef.visible !== false;
+                }
+            }
+        }
+    }
+
+    setInputVisibility(inputName, b) {
+        this.def.graph = this.def.graph || {};
+        this.def.graph.in = this.def.graph.in || {};
+        this.def.graph.in.visible = this.def.graph.in.visible || {};
+        this.def.graph.in.visible[inputName] = b;
+    }
+
+    setOutputVisibility(outputName, b) {
+        this.def.graph = this.def.graph || {};
+        this.def.graph.out = this.def.graph.out || {};
+        this.def.graph.out.visible = this.def.graph.out.visible || {};
+        this.def.graph.out.visible[outputName] = b;
+    }
+
+    // return true if the node has an input link to the node given in id
+    hasInputLinkTo( id ) {
+        var hasLink = false;
+        _.each( this.getNormalizeLinksDef(), (link, inputName) => {
+            _.each(link, (outputName, nodeId) => {
+                if( nodeId == "input" || nodeId == "output" ) {
+                    nodeId = outputName;
+                }
+                if( nodeId == id ) {
+                    hasLink = true;
+                }
+            });
+        });
+        return hasLink;
+    }
+
+    // return true if the node has an output link to the node given in id
+    hasOutputLinkTo( id ) {
+        var n = this.m.getNode(id);
+        return n.hasInputLinkTo(this.id);
+    }
+
+    // true if the node is connected to "nodeId" through input "nodeInput"
+    isConnectedToInput(nodeId, nodeInput) {
+        var connected = false;
+        var node = this.m.getNode(nodeId);
+        _.each( this.listOutputs(), (outputName) => {
+            if( node.isConnectedToOutput( this.id, outputName ) ) {
+                connected = true;
+                return false; // eol
+            }
+        });
+        return connected;
+    }
+
+    // true if the node is connected to "nodeId" through output "nodeOutput"
+    isConnectedToOutput(nodeId, nodeOutput) {
+        var connected = false;
+        _.each(this.getNormalizeLinksDef(), (link) => {
+            _.each(link, (outputName, outputNodeId) => {
+                if( nodeId === outputNodeId ) {
+                    connected = true;
+                    return false; // eol
+                }
+            });
+        });
+        return connected;
+    }
+
+    listInputs() {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.input && Object.keys(pkg.dualbox.input);
+    }
+
+    listOutputs() {
+        var pkg = this.getPackage();
+        return pkg && pkg.dualbox && pkg.dualbox.output && Object.keys(pkg.dualbox.output);
+    }
+
+    // get the list of DataLink for inbound connections of this node
+    getInboundLinks() {
+        var links = [];
+
+        _.each( this.getNormalizeLinksDef(), (link, inputName) => {
+            _.each( link, (outputName, outputNodeId) => {
+                if( outputNodeId !== "graph" ) {
+                    links.push( new DataLink(this.m, outputNodeId, outputName, this.id, inputName) );
+                }
+            });
+        });
+
+        return links;
+    }
+
+    // get the list of DataLink for outbound connections of this node
+    getOutboundLinks() {
+        var links = [];
+        var collectLinks = (def, id) => {
+            var node = this.m.getNode(id);
+            _.each( node.getInboundLinks(), (link) => {
+                if( link.isSourceNode(this) ) {
+                    links.push(link);
+                }
+            });
+        };
+        var collectInputLinks = (def, id) => collectLinks(def, this.m.inputPrefix + id);
+        var collectOutputLinks = (def, id) => collectLinks(def, this.m.outputPrefix + id);
+
+        _.each( this.m.data.app.modules, collectLinks );
+        _.each( this.m.data.app.ui, collectLinks );
+        _.each( this.m.data.app.input, collectInputLinks );
+        _.each( this.m.data.app.output, collectOutputLinks );
+        return links;
+    }
+
+    getInboundEvents() {
+        var events = [];
+
+        var collectEvents = (def, id) => {
+            var node = this.m.getNode(id);
+            _.each( node.def.events, (eventDef, index) => {
+                if( eventDef.node == this.id ) {
+                    events.push( new EventLink(this.m, node.id, this.id, eventDef.event, eventDef.node, eventDef.cond, eventDef.data) );
+                }
+            });
+        };
+        _.each( this.m.data.app.ui, collectEvents );
+        return events;
+    }
+
+    isInputConnected(inputName) {
+        var r = false;
+
+        if( (this.isInput() || this.isOutput()) && outputName === "value" ) {
+            var targetId = this.isInput() ? "input" : "output";
+            var targetInput = this.graphId;
+        }
+        else {
+            var targetId = this.graphId;
+            var targetInput = inputName;
+        }
+
+        _.each(this.getInboundLinks(), (link) => {
+            if( link.targetId == targetId && link.targetInput === targetInput ) {
+                r = true;
+                return false;
+            }
+        });
+        return r;
+    }
+
+    isOutputConnected(outputName) {
+        var r = false;
+
+        if( (this.isInput() || this.isOutput()) && outputName === "value" ) {
+            var sourceId = this.isInput() ? "input" : "output";
+            var sourceOutput = this.graphId;
+        }
+        else {
+            var sourceId = this.graphId;
+            var sourceOutput = outputName;
+        }
+
+        _.each(this.getOutboundLinks(), (link) => {
+            if( link.sourceId == sourceId && link.sourceOutput === sourceOutput ) {
+                r = true;
+                return false;
+            }
+        });
+        return r;
+    }
+
+    // return true if the node is in a metanode
+    isInMetanode() {
+        return this.m.getCurrentMetanodeName() != "Application";
+    }
+
+    // Works only is this.isInMetanode() == true
+    getParentMetanode() {
+        return this.m.data.windows[this.m.data.windows.length - 2][1];
+    }
+
+    getParentMetanodeName() {
+        return this.m.data.windows[this.m.data.windows.length - 2][0];
+    }
+
+    // Works only is this.isInMetanode() == true
+    execInParentWindow(cb) {
+        this.m.history.holdSaving(true);
+        var savedWindow = this.m.data.windows[ this.m.data.windows.length - 1];
+
+        // set the parent window
+        var parentName = this.getParentMetanodeName();
+        this.m.setWindow(parentName);
+
+        // exec our callback
+        var ret = cb();
+
+        // reinstall the saved state
+        this.m.data.app = savedWindow[1];
+        this.m.data.windows.push(savedWindow);
+
+        this.m.history.holdSaving(false);
+
+        return ret;
+    }
+
+    // get the event at index i
+    getEvent(i) {
+        return idx(this.def, o => o.events[i]);
+    }
+
+    hasComment() {
+        return this.getComment() !== undefined;
+    }
+
+    getComment() {
+        return idx(this.def, o => o.comment);
+    }
+
+    deleteComment() {
+        delete this.def.comment;
+        this.m.history.save();
+    }
+
+    setComment(s) {
+        this.def.comment = s;
+        this.m.history.save();
+    }
+
+    setEvent(i, def) {
+        this.def.events[i] = def;
+        this.m.history.save();
+    }
+
+    removeEvent(i) {
+        this.def.events.splice(i, 1);
+        this.m.history.save();
+    }
+
+    setPosition(pos) {
+        this.def.graph = this.def.graph || {};
+        this.def.graph.position = pos;
+        this.m.history.save();
+    }
+
+    getPosition() {
+        var pos = this.def.graph && this.def.graph.position || { left: 0, top: 0 };
+        pos.top  = parseInt(pos.top);
+        pos.left = parseInt(pos.left);
+        return pos;
+    }
+
+    deleteInputLink( inputName ) {
+        delete this.def.links[inputName];
+        this.m.history.save();
+    }
+
+    _deleteInputLinksTo(id) {
+        var n = this.m.getNode(id);
+        _.each( this.getNormalizeLinksDef(), (link, inputName) => {
+            _.each(link, (outputName, nodeId) => {
+                if( nodeId == "input" || nodeId == "output" ) {
+                    nodeId = outputName;
+                }
+                if( nodeId == id ) {
+                    if( this.isInput() || this.isOutput() ) {
+                        delete this.def.link;
+                    }
+                    else {
+                        delete this.def.links[inputName];
+                    }
+                }
+            });
+        });
+    }
+
+    // detach connexion on a specific input
+    detachInput( inputName ) {
+        _.each( this.getInboundLinks(), (link) => {
+            if( link.targetInput == inputName ) {
+                link.detach();
+            }
+        });
+    }
+
+    // detach connexion on a specific output 
+    detachOutput( outputName ) {
+        _.each( this.getOutboundLinks(), (link) => {
+            if( link.sourceOutput == outputName ) {
+                link.detach();
+            }
+        });
+    }
+
+    // delete all links from and to this node
+    detach() {
+        _.each( this.getInboundLinks(), (link) => {
+            link.detach();
+        });
+        _.each( this.getOutboundLinks(), (link) => {
+            link.detach();
+        });
+        this.m.history.save();
+    }
+
+    detachEvents() {
+        _.each( this.getInboundEvents(), (link) => {
+            link.detach();
+        });
+    }
+
+    addTo( app ) {
+        switch(this.type) {
+        case "module": app.modules[this.graphId] = this.def; break;
+        case "ui":     app.ui[this.graphId]      = this.def; break;
+        case "input":  app.input[this.graphId]   = this.def; break;
+        case "output": app.output[this.graphId]  = this.def; break;
+        default:
+            throw "wtf";
+        }
+    }
+
+    removeFrom( app ) {
+        this.detach();
+        this.detachEvents();
+
+        switch(this.type) {
+        case "module": delete app.modules[this.graphId]; break;
+        case "ui":     delete app.ui[this.graphId]; break;
+        case "input":
+            delete app.input[this.graphId];
+            if( !this.m.isRootApp(app) ) {
+                // we are changing the signature of a metamodule
+                // ensure we disconnect this input in all instances of it
+                // and remove all loops on it
+                this.execInParentWindow(() => {
+                    var instances = this.m.getMetanodeInstances(app);
+
+                    // for each instance of this metanode
+                    // disconnect the input, and remove loops
+                    _.each(instances, (n) => {
+                        if( n.isInputConnected(this.graphId) ) {
+                            n.detachInput(this.graphId);
+                        }
+
+                        if( n.hasIterator(this.graphId) ) {
+                            n.unsetIterator(this.graphId);
+                        }
+                    });
+                });
+            }
+            break;
+        case "output":
+            delete app.output[this.graphId];
+            if( !this.m.isRootApp(app) ) {
+                // we are changing the signature of a metamodule
+                // ensure we disconnect this output in all instances of it
+                // and remove all loops on it
+                this.execInParentWindow(() => {
+                    var instances = this.m.getMetanodeInstances(app);
+
+                    _.each(instances, (n) => {
+                        if( n.isOutputConnected(this.graphId) ) {
+                            n.detachOutput(this.graphId);
+                        }
+
+                        if( n.hasFeedback(this.graphId) ) {
+                            n.unsetFeedback(this.graphId);
+                        }
+                    });
+                });
+            }
+            break;
+        default:
+            throw "wtf";
+        }
+
+        // if the node is an UI, we need to change the "data-node" links in the HTML
+        if( this.isUI() ) {
+            // Deep search and replaces the given property value "prevVal" with "newVal"
+            var removeFromInterface = (o, id) => {
+                const newObject = _.clone(o);
+
+                _.each(o, (val, key) => {
+                    if(key == "node" && val === id) {
+                        delete newObject[key];
+                    } else if (typeof(val) === 'object' || typeof(val) === 'array') {
+                        newObject[key] = removeFromInterface(val, id);
+                    }
+                });
+
+                return newObject;
+            }
+            app.interface = removeFromInterface(app.interface, this.id);
+
+            // remove this node from all app events (API) using it
+            var removeFromAppEvents = (o, id) => {
+                const newObject = _.clone(o);
+                _.each(newObject, (eventDef, eventName) => {
+                    if( eventDef.in ) {
+                        _.remove(eventDef.in, o => o.node == this.id);
+                    }
+                    if( eventDef.out && eventDef.out.node == this.id ) {
+                        delete eventDef.out;
+                    }
+                });
+                return newObject;
+            }
+            app.events = removeFromAppEvents(app.events, this.id);
+        }
+    }
+
+    // remove from current app
+    remove() {
+        this.m.history.holdSaving(true);
+        this.removeFrom( this.app );
+        this.m.history.holdSaving(false);
+        this.m.history.save();
+    }
+
+    rename(newId) {
+        this.m.history.batch(() => {
+            var newGraphId;
+            if( this.isInput() ) {
+                if( newId.startsWith(this.m.inputPrefix) ) {
+                    newGraphId = newId.substring(3);
+                }
+                else {
+                    newGraphId = newId;
+                    newId = this.m.inputPrefix + newId;
+                }
+            }
+            else if( this.isOutput() ) {
+                if( newId.startsWith(this.m.outputPrefix) ) {
+                    newGraphId = newId.substring(4);
+                }
+                else {
+                    newGraphId = newId;
+                    newId = this.m.outputPrefix + newId;
+                }
+            }
+            else {
+                newGraphId = newId;
+            }
+
+            // collect (and detach) all links to this node
+            var links2node = [];
+            _.each(this.m.getNodes(), (n) => {
+                var links = n.getInboundLinks();
+                _.each( links, (link) => {
+                    if( link.isSourceNode(this) ) {
+                        link.detach();
+                        links2node.push(link);
+                    }
+                });
+            });
+
+            // if it's an UI, we also want the events to this node
+            if( this.isUI() ) {
+                var events2node = [];
+                _.each(this.m.getNodes("ui"), (n) => {
+                    var events = n.getOutboundEvents();
+                    _.each(events, (e) => {
+                        if( e.node === this.getGraphId() ) {
+                            events2node.push(e);
+                        }
+                    });
+                });
+            }
+
+            // if we are renaming an input or output in a metanode, we need to disconnect
+            // all links to that input/output and reconnect them later
+            if( this.isInMetanode() && (this.isInput() || this.isOutput()) ) {
+                var metanodeName = this.m.getCurrentMetanodeName();
+
+                // detach the links of parent node connected to this input
+                var parentLinks = this.execInParentWindow(() => {
+                    var links = [];
+                    var parentNodes = [];
+                    var nodes = this.m.getNodes("modules");
+                    _.each(nodes, (n) => {
+                        if( n.def.module == metanodeName ) {
+                            parentNodes.push(n);
+                        }
+                    });
+
+                    if( this.isInput() ) {
+                        // get inboundLinks of this node that target this input, and detach them
+                        _.each(parentNodes, (n) => {
+                            _.each(n.getInboundLinks(), (l) => {
+                                if( l.targetInput == this.graphId ) {
+                                    l.detach();
+                                    l.targetInput = newGraphId; // modify the link with the new id
+                                    links.push(l);
+                                }
+                            });
+                        });
+                    }
+                    else if( this.isOutput() ) {
+                        // get inboundLinks of this node that target this input, and detach them
+                        _.each(parentNodes, (n) => {
+                            _.each(n.getOutboundLinks(), (l) => {
+                                if( l.sourceOutput == this.graphId ) {
+                                    l.detach();
+                                    l.sourceOutput = newGraphId; // modify the link with the new id
+                                    links.push(l);
+                                }
+                            });
+                        });
+                    }
+
+                    return links;
+                });
+            }
+
+            // rename the node
+            switch( this.type ) {
+                case "input":
+                    this.app.input[newGraphId] = this.app.input[this.graphId];
+                    delete this.app.input[this.graphId];
+                    break;
+                case "output":
+                    this.app.output[newGraphId] = this.app.output[this.graphId];
+                    delete this.app.output[this.graphId];
+                    break;
+                case "module":
+                    this.app.modules[newGraphId] = this.app.modules[this.graphId];
+                    delete this.app.modules[this.graphId];
+                    break;
+                case "ui":
+                    this.app.ui[newGraphId] = this.app.ui[this.graphId];
+                    delete this.app.ui[this.graphId];
+                    break;
+                default:
+                    throw new Error("Could not identify node " + this.graphId + " in graph");
+            }
+
+            // reattach the links to the new node
+            _.each(links2node, (link) => {
+                if( link.sourceId == "input" || link.sourceId == "output" ) {
+                    link.sourceOutput = newId;
+                }
+                else {
+                    link.sourceId = newId;
+                }
+                link.attach();
+            });
+
+            // redirect the events
+            _.each(events2node, (evt) => {
+                evt.node = newId;
+            });
+
+            // if the node is an UI, we need to change the "data-node" links in the HTML
+            if( this.isUI() ) {
+                // Deep search and replaces the given property value "prevVal" with "newVal"
+                function replaceInInterface(o, oldId, newId) {
+                    const newObject = _.clone(o);
+
+                    _.each(o, (val, key) => {
+                        if(key == "node" && val === oldId) {
+                            newObject[key] = newId;
+                            console.log("replacing!");
+                        } else if (typeof(val) === 'object' || typeof(val) === 'array') {
+                            newObject[key] = replaceInInterface(val, oldId, newId);
+                        }
+                    });
+
+                    return newObject;
+                }
+
+                this.app.interface = replaceInInterface(this.app.interface, this.graphId, newGraphId);
+            }
+
+            // if we are renaming an input or output in a metanode, we now reattach the link we detached earlier
+            if( this.isInMetanode() && (this.isInput() || this.isOutput()) ) {
+                this.execInParentWindow(() => {
+                    _.each(parentLinks, (l) => {
+                        l.attach();
+                    });
+                });
+            }
+        });
+    }
+}
+
+
+/* representing a data connection between 2 nodes */
+class DataLink {
+    constructor(m, sourceId, sourceOutput, targetId, targetInput) {
+        this.m = m;
+        this.sourceId = sourceId;
+        this.sourceOutput = sourceOutput;
+        this.targetId = targetId;
+        this.targetInput = targetInput;
+
+        this.normalize();
+    }
+
+    normalize() {
+        // normalize the input/output syntax in here
+        var sourceNode = this.getSourceNode();
+        if( sourceNode.isInput() ) {
+            this.sourceId = "input";
+            this.sourceOutput = this.m.inputPrefix + sourceNode.graphId;
+        }
+        else if( sourceNode.isOutput() ) {
+            this.sourceId = "output";
+            this.sourceOutput = this.m.outputPrefix + sourceNode.graphId;
+        }
+
+        var targetNode = this.getTargetNode();
+        if( targetNode.isInput() ) {
+            this.targetId = "input";
+            this.targetInput = this.m.inputPrefix + targetNode.graphId;
+        }
+        else if( targetNode.isOutput() ) {
+            this.targetId = "output";
+            this.targetInput = this.m.outputPrefix + targetNode.graphId;
+        }
+    }
+
+    getSourceNode() {
+        if( this.sourceId === "input" ) {
+            if( this.sourceOutput.startsWith(this.m.inputPrefix) ) {
+                return this.m.getNode(this.sourceOutput);
+            }
+            else {
+                return this.m.getNode(this.m.inputPrefix + this.sourceOutput);
+            }
+        }
+        else if( this.sourceId === "output" ) {
+            if( this.sourceOutput.startsWith(this.m.outputPrefix) ) {
+                return this.m.getNode(this.sourceOutput);
+            }
+            else {
+                return this.m.getNode(this.m.outputPrefix + this.sourceOutput);
+            }
+        }
+        else {
+            return this.m.getNode(this.sourceId);
+        }
+    }
+
+    getTargetNode() {
+        if( this.targetId === "input" ) {
+            if( this.targetInput.startsWith(this.m.inputPrefix) ) {
+                return this.m.getNode(this.targetInput);
+            }
+            else {
+                return this.m.getNode(this.m.inputPrefix + this.targetInput);
+            }
+        }
+        else if( this.targetId == "output" ) {
+            if( this.targetInput.startsWith(this.m.outputPrefix) ) {
+                return this.m.getNode(this.targetInput);
+            }
+            else {
+                return this.m.getNode(this.m.outputPrefix + this.targetInput);
+            }
+        }
+        else {
+            return this.m.getNode(this.targetId);
+        }
+    }
+
+    isSourceNode( n ) {
+        return n.id === this.getSourceNode().id;
+    }
+
+    isTargetNode( n ) {
+        return n.id === this.getTargetNode().id;
+    }
+
+    // splitted link: add a step between pos1 and pos2
+    // prevPos: the previous position object ({ left: xxx, top: xxx}) or "source"
+    // pos: the new step
+    addPathStep( prevPos, pos ) {
+        var def = this.getDef();
+        if( prevPos == "source" ) {
+            def.graph = def.graph || {};
+            def.graph.path = def.graph.path || [];
+            def.graph.path.unshift(pos);
+        }
+        else {
+            // we need to find pos1 in the array to add pos at the right location
+            var index;
+            _.each( def.graph.path, (p, i) => {
+                if( p.left == prevPos.left && p.top == prevPos.top ) {
+                    index = i+1;
+                    return false;
+                }
+            });
+            def.graph.path.splice(index, 0, pos);
+        }
+        this.m.history.save();
+    }
+
+    updatePathStep( oldPos, newPos ) {
+        var def = this.getDef();
+        var index;
+        _.each( def.graph.path, (p, i) => {
+            if( p.left == oldPos.left && p.top == oldPos.top ) {
+                index = i;
+                return false;
+            }
+        });
+        def.graph.path[index] = newPos;
+        this.m.history.save();
+    }
+
+    removePathStep( pos ) {
+        var def = this.getDef();
+        var index;
+        _.each( def.graph.path, (p, i) => {
+            if( p.left == pos.left && p.top == pos.top ) {
+                index = i;
+                return false;
+            }
+        });
+        def.graph.path.splice(index, 1);
+        if( def.graph.path.length == 0 ) {
+            delete def.graph.path;
+        }
+        this.m.history.save();
+    }
+
+    // get the link definition object
+    getDef() {
+        var targetNode = this.getTargetNode();
+        if( targetNode.isInput() ) {
+            return targetNode.def.link;
+        }
+        else if( targetNode.isOutput() ) {
+            return targetNode.def.link;
+        }
+        else {
+            return targetNode.def.links && targetNode.def.links[this.targetInput] || {};
+        }
+    }
+
+    getPath() {
+        return idx(this.getDef(), o => o.graph.path);
+    }
+
+    setDef(def) {
+        var targetNode = this.getTargetNode();
+        if( targetNode.isInput() ) {
+            targetNode.def.link = def;
+        }
+        else if( targetNode.isOutput() ) {
+            targetNode.def.link = def;
+        }
+        else {
+            targetNode.def.links = targetNode.def.links || {};
+            targetNode.def.links[this.targetInput] = def;
+        }
+    }
+
+    equals( dl ) {
+        return this.sourceId == dl.sourceId &&
+            this.targetId == dl.targetId &&
+            this.sourceOutput == dl.sourceOutput &&
+            this.targetInput == dl.targetInput;
+    }
+
+    // set the connection in the app
+    attach() {
+        // build the connection object
+        var sourceNode = this.getSourceNode();
+        if( sourceNode.isInput() ) {
+            var connection = { "input" : sourceNode.graphId }
+        }
+        else if( sourceNode.isOutput() ) {
+            var connection = { "output" : sourceNode.graphId }
+        }
+        else {
+            var connection = {};
+            connection[ sourceNode.graphId ] = this.sourceOutput;
+        }
+
+        // add it at the right place in target node
+        var targetNode = this.getTargetNode();
+        if( targetNode.def.links && targetNode.def.links[this.targetInput] !== undefined ) {
+            // if it's the same link we are trying to add, it's ok.
+            var linkDef = targetNode.def.links[this.targetInput];
+            var key = Object.keys(linkDef)[0];
+            var val = linkDef[key];
+            var l = new DataLink(this.m, key, val, this.targetId, this.targetInput);
+            if( !this.equals(l) ) {
+                throw "Can not add link " + this.sourceId + ":" + this.sourceOutput + " -> " +
+                    this.targetId + ":" + this.targetInput + " : a link already exist to target input";
+            }
+        }
+
+        this.setDef( connection );
+    }
+
+    // remove the connection from the app
+    detach() {
+        var targetNode = this.getTargetNode();
+        if( targetNode.isInput() || targetNode.isOutput() ) {
+            delete targetNode.def.link;
+        }
+        else {
+            delete targetNode.def.links[this.targetInput];
+        }
+    }
+}
+
+/* representing a connection between 2 UIs */
+class EventLink {
+    constructor(m, sourceId, targetId, eventName, eventCond, eventData) {
+        this.m = m;
+        this.sourceId = sourceId;
+        this.targetId = targetId;
+        this.eventName = eventName;
+        this.eventCond = eventCond;
+        this.eventData = eventData;
+    }
+
+    toString() {
+        return this.sourceId + " --(" + this.eventName + ")--> " + this.targetId;
+    }
+
+    getDef() {
+        var n = this.m.getNode(this.sourceId);
+        var def;
+        _.each(n.def.events, (evt) => {
+            if( evt.node == this.targetId && evt.event == this.eventName ) {
+                def = evt;
+                return false;
+            }
+        });
+        return def || {};
+    }
+
+    setDef(def) {
+        // check if event already exists
+        var n = this.m.getNode(this.sourceId);
+        var index;
+        _.each(n.def.events, (evt, i) => {
+            if( evt.node == this.targetId && evt.event == this.eventName ) {
+                index = i
+                return false;
+            }
+        });
+
+        if( !n.def.events ) n.def.events = [];
+
+        if( index ) {
+            n.def.events[index] = def;
+        }
+        else {
+            n.def.events.push(def);
+        }
+    }
+
+    getPath() {
+        return idx(this.getDef(), o => o.graph.path);
+    }
+
+    attach() {
+        this.setDef({
+            "node"  : this.targetId,
+            "event" : this.eventName
+        });
+    }
+
+    detach() {
+        var n = this.m.getNode(this.sourceId);
+        _.remove(n.def.events, (evt) => {
+            return evt.node === this.targetId && evt.event === this.eventName;
+        });
+    }
+
+    // splitted link: add a step between pos1 and pos2
+    // prevPos: the previous position object ({ left: xxx, top: xxx}) or "source"
+    // pos: the new step
+    addPathStep( prevPos, pos ) {
+        var def = this.getDef();
+        if( _.isEmpty(def) ) {
+            console.error('Definition of ' + this.toString() + ' shouldnt be empty');
+        }
+        if( prevPos == "source" ) {
+            def.graph = def.graph || {};
+            def.graph.path = def.graph.path || [];
+            def.graph.path.unshift(pos);
+        }
+        else {
+            // we need to find pos1 in the array to add pos at the right location
+            var index;
+            _.each( def.graph.path, (p, i) => {
+                if( p.left == prevPos.left && p.top == prevPos.top ) {
+                    index = i+1;
+                    return false;
+                }
+            });
+            def.graph.path.splice(index, 0, pos);
+        }
+        this.m.history.save();
+    }
+
+    updatePathStep( oldPos, newPos ) {
+        var def = this.getDef();
+        var index;
+        _.each( def.graph.path, (p, i) => {
+            if( p.left == oldPos.left && p.top == oldPos.top ) {
+                index = i;
+                return false;
+            }
+        });
+        def.graph.path[index] = newPos;
+        this.m.history.save();
+    }
+
+    removePathStep( pos ) {
+        var def = this.getDef();
+        var index;
+        _.each( def.graph.path, (p, i) => {
+            if( p.left == pos.left && p.top == pos.top ) {
+                index = i;
+                return false;
+            }
+        });
+        def.graph.path.splice(index, 1);
+        if( def.graph.path.length == 0 ) {
+            delete def.graph.path;
+        }
+        this.m.history.save();
+    }
+}
+
+class Application {
+    constructor(m, json, name, readOnly = false) {
+        this.json = readOnly ? _.cloneDeep(json) : json;
+        this.name = name;
+    }
+
+    getDescription() {
+        return idx(this.json, o => o.description);
+    }
+
+    setDescription(desc) {
+        this.json.description = desc;
+    }
+
+    getInputsNames() {
+        return _.keys( idx(this.json, o => o.input) );
+    }
+
+    getOutputsNames() {
+        return _.keys( idx(this.json, o => o.output) );
+    }
+
+    getAttributesNames() {
+        return _.keys( idx(this.json, o => o.attr) );
+    }
+
+    getEventsNames() {
+        return _.keys( idx(this.json, o => o.events) );
+    }
+
+    hasInputs() {
+        return this.getInputsNames().length > 0;
+    }
+
+    hasOutputs() {
+        return this.getOutputsNames().length > 0;
+    }
+
+    hasAttributes() {
+        return this.getAttributesNames().length > 0;
+    }
+
+    hasEvents() {
+        return this.getEventsNames().length > 0;
+    }
+
+    getEventDescription(name) {
+        return idx(this.json, o => o.events[name].desc);
+    }
+
+    setEventDescription(name, desc) {
+        this.json.events = this.json.events || {};
+        this.json.events[name] = this.json.events[name] || {};
+        this.json.events[name].desc = desc;
+    }
+
+    getEventIn(name) {
+        return idx(this.json, o => o.events[name].in);
+    }
+
+    getEventOut(name) {
+        return idx(this.json, o => o.events[name].out);
+    }
+
+    removeAppEvent(name) {
+        delete this.json.events[name];
+    }
+
+    renameAppEvent(oldName, newName) {
+        this.json.events[newName] = this.json.events[oldName];
+        delete this.json.events[oldName];
+    }
+
+    removeAppInEvent(name, index) {
+        this.json.events[name].in.splice(index, 1);
+    }
+
+    removeAppOutEvent(name) {
+        delete this.json.events[name].out;
+    }
+
+    addSubEvent(name, nodeName, evtName) {
+        this.json.events[name].in.push({ "node": nodeName, "event": evtName});
+    }
+
+    addCallback(name) {
+        this.json.events[name].out = {};
+    }
+
+    addAppEvent(name) {
+        this.json.events[name] = { "in" : [] };
+    }
+}
+
+export default GraphModel;
+

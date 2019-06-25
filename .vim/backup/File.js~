@@ -1,0 +1,217 @@
+var Dualbox = require('@dualbox/dualbox');
+var ABb64 = require('@dualbox/dualbox-lib-abb64');
+
+const Errors = Dualbox.errors;
+const env = Dualbox.env;
+
+
+// TODO : replace blob with arraybuffer data
+function ab2str(buf) {
+    var result = '';
+    if (buf) {
+        var bytes = new Uint8Array(buf);
+        for (var i = 0; i < bytes.byteLength; i++) {
+            result = result + String.fromCharCode(bytes[i]);
+        }
+    }
+    return result;
+}
+
+function str2ab(str) {
+    var buf = new ArrayBuffer(str.length*2); // 2 bytes for each char
+    var bufView = new Uint16Array(buf);
+    for(var i=0, strLen=str.length; i<strLen; i++) {
+        bufView[i] = str.charCodeAt(i);
+    }
+    return buf;
+}
+
+function utf8_str2ab(str) {
+    var buf = new ArrayBuffer(str.length);
+    var bufView = new Uint8Array(buf);
+    for(var i=0, strLen=str.length; i<strLen; i++) {
+        bufView[i] = str.charCodeAt(i);
+    }
+    return buf;
+}
+
+/*
+ *  DualBox class for file. Basically a wrapper for ArrayBuffers
+ *
+ *
+ *  @param {ArrayBuffer|Buffer|String} data Strings are accepted in UTF8 only, they will be converted into Buffers.
+ *  @param {string} name
+ *  @param {string} extension File extension. If extension is txt,
+ */
+class File {
+    constructor(data, extension, name) {
+
+        if(typeof data === "string"){
+            this.data = utf8_str2ab(data);
+        }else if(data && (data.buffer !== undefined)){ // ArrayBuffers like Uint8 or Uint16 are accepted
+            this.data = data.buffer;
+        }else{
+            this.data = data;
+        }
+
+        this.name = name === undefined ? "untitled" : name;
+        this.ext = extension === undefined? "" : extension.toLowerCase();
+    }
+
+    // WARNING : only works in browser
+    download() {
+        if( env.browser ) {
+            var a = document.createElement('a');
+            if(window === undefined){
+                throw "following download won't work, for some reason window is not defined.";
+            }
+            var blob = this.toBlob();
+            a.href = window.URL.createObjectURL(blob);
+            a.download = this.name + (this.ext === ""? "" : "."+this.ext);
+
+            // simulate a click on the link
+            if (document.createEvent) {
+                var event = document.createEvent("MouseEvents");
+                event.initEvent("click", true, true);
+                a.dispatchEvent(event);
+            } else {
+                a.click();
+            }
+        }
+    }
+
+    toBlob() {
+        return new Blob([this.data], { type: "application/octet-stream" });
+    }
+
+    toArrayBuffer(){
+        return this.data;
+    }
+
+    toUTF8String(){
+        return new Buffer(this.data).toString('utf8');
+    }
+
+    getName(){
+        return this.name;
+    }
+
+    getExtension(){
+        return this.ext;
+    }
+
+    getData(){
+        return this.data;
+    }
+
+    getSize(){
+        return new Uint8Array(this.data).length;
+    }
+
+    clone(){
+        return new File(this.getData(), this.getExtension(), this.getName());
+    }
+
+    toJSON(){
+        if(typeof this.data === "string"){
+            throw "Error this.data should not be a string";
+        }
+        var data = {
+            encoding:"base64",
+            data:ABb64.toBase64(new Uint8Array(this.data)),
+            name:this.name,
+            ext:this.ext
+        };
+        return {
+            metadata: {
+                type:File.type
+            },
+            data:data
+        };
+    }
+
+    fromJSON(json){
+        if( json.metadata && json.metadata.type !== File.type ||
+            json.metadata && (!json.data || !json.data.data || !json.data.name || !json.data.ext) ||
+            !json.metadata && (!json.data || !json.name || !json.ext)) {
+            throw new Errors.RuntimeError("can not deserialize File: data is not a DualBox.File");
+        }
+
+        var d = json.metadata ? json.data : json;
+        if(d.encoding === "base64"){
+            this.data = ABb64.fromBase64(d.data,Uint8Array).buffer
+        }else if(typeof d.data === "string"){
+            this.data = utf8_str2ab(d.data);
+        }else{
+            this.data = new Uint8Array(d.data).buffer;
+        }
+        this.name = d.name;
+        this.ext = d.ext;
+        return this;
+    }
+
+    toWorkerData() {
+        return {
+            metadata: {
+                type:File.type
+            },
+            data: {
+                data: new Uint8Array(this.data),
+                name: this.name,
+                ext: this.ext
+            }
+        }
+    }
+
+    fromWorkerData(wd) {
+        this.ext  = wd.data.ext;
+        this.name = wd.data.name;
+        this.data = wd.data.data.buffer;
+    }
+
+    serialize(){
+        return this.toJSON();
+    }
+
+    deserialize(data){
+        return this.fromJSON(data);
+    }
+
+};
+
+File.type = "File";
+
+File.deserialize = function(data){
+    return (new File("","","")).deserialize(data);
+};
+File.fromJSON = function(data){
+    return (new File("","","")).fromJSON(data);
+};
+
+// Build a File from a blob instead of data.
+// This is a smart constructor using the extension to setup the adapted data format.
+// Only works in browser since blob is not defined in node.
+// callback(result) with result a file as expected.
+File.asyncBuildFromBlob = function(blob, extension, name, callback){
+    var r = new FileReader();
+    r.onload = function(e) {
+        var contents = e.target.result;
+        callback(new File(contents,extension,name));
+    };
+    r.readAsArrayBuffer(blob);
+};
+
+File.buildFromBuffer = function(buffer, extension, name){
+    var toArrayBuffer = function (buf){
+        var ab = new ArrayBuffer(buf.length);
+        var view = new Uint8Array(ab);
+        for (var i = 0; i < buf.length; ++i) {
+            view[i] = buf[i];
+        }
+        return ab;
+    }
+
+    return new File(toArrayBuffer(buffer),extension,name);
+};
+
+module.exports = File;

@@ -1,0 +1,340 @@
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Couleur
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+syntax on " coloration syntaxique activee
+set background=dark    " fond noir
+hi Comment ctermfg=6 "commentaires en bleu clair
+"set t_Co=256  " autorise le 256 couleurs
+"colorscheme desert256 " un schema de coloriage, il y a aussi inkpot et gardener
+
+"coloration syntaxique sur tout le fichier pour éviter de la perdre sur les big files
+autocmd BufEnter * :syntax sync fromstart
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Indentation
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set encoding=utf-8
+set fileencoding=utf-8
+filetype indent on
+filetype indent plugin on " activer l'indendation des plugins
+set preserveindent
+set autoindent   " l'auto indentation n'est specifique a aucun langage et fonctionne moins bien
+set shiftwidth=4 " largeur de l'auto indentation
+set tabstop=4    " largeur du caractere tab
+set softtabstop=4 " largeur de l'indentation du caractere tab
+set smarttab
+"set smartindent
+set formatoptions=tcroqn
+set listchars=tab:>-,trail:_ " definit une convention pour les caracteres speciaux (tab = >---- )
+set list             " applique ces conventions
+set wrapmargin=0  " pas de saut de lignes non explicitement specifies
+set textwidth=0
+set expandtab
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Fonctionnement
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set autoread " recharge le fichier lorsqu'il a ete modifie
+set autowrite " sauve le buffer lorsqu'on switch sur un autre buffer
+set autowriteall " sauve tous les buffers lorsque vi quitte
+set wrapscan " revient au debut du fichier lors d'une recherche de chaine (si on atteint la fin)
+set history=50 " nombre de commande sauvegardees dans l'historique
+set ignorecase " insensible a la casse
+set textauto " detecte les caracteres de fin de lignes, et bascule en mode texte si oui
+set secure " mode securise, on ne peut pas quitter sans sauvegarder ou entrer un !
+set uc=0 " n'utilise pas de fichier swap
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Affichage
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set showcmd " affiche la commande qu'on vient de taper (ou le nombre de lignes selectionnees en mode visuel)
+set incsearch " deplace le curseur au fur et a mesure qu'on tape une recherche
+set report=0  " affiche le nombre de modifications (suite a une commande) lorsqu'il y en a plus de 0
+set number    " affiche les numeros de ligne
+set scrolloff=5 " toujours laisser 5 lignes visibles au dessus et en dessous du curseur
+set laststatus=2 " toujours afficher la barre d'etat (en plus de la barre de commande)
+set statusline=%<%f%m\ %r\ %h\ %w%=%l,%c\ %p%% " format de la barre d'etat
+set list " afficher les caracteres caches
+set showmode " affiche le mode courant de vi
+set hidden " permet de cacher les buffers qui ont ete modifies
+set hlsearch " surlignes les chaines trouvees (pendant une recherche)
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"  Reglages et raccourcis
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set nocompatible " regle des defauts de deplacement (fleches par exemple)
+set backspace=2 " permet l'effacement avec backspace
+
+"map <S-Insert> <ESC>:setl paste<CR>gi<C-R>+<ESC>:setl nopaste<CR>gi
+
+" commenter et decommenter automatiquement une ligne (dependamment du langage)
+filetype on
+augroup vimrc_filetype
+ autocmd!
+ autocmd FileType c call s:C_Comment()
+ autocmd FileType python call s:Python_Comment()
+ autocmd FileType play call s:Python_Comment()
+ autocmd FileType sh call s:Regular_Comment()
+ autocmd FileType vim call s:Vim_Comment()
+ autocmd FileType make call s:Make_Comment()
+augroup end
+
+" F11 pour decommenter la ligne, F12 pour commenter
+function! s:C_Comment()
+  " remplace le debut de ligne par //
+  map <F11> :s/^/\/\//<CR>:nohlsearch<CR>
+  map <F12> :s/^\/\///<CR>:nonhlsearch<CR>
+endfunction
+
+function! s:Vim_Comment()
+  " replace le debut de ligne par "
+  map <F11> :s/^/\"/<CR>:nohlsearch<CR>
+  map <F12> :s/^\"//<CR>:nohlsearch<CR>
+endfunction
+
+function! s:Python_Comment()
+  " replace le debut de ligne par #
+  map <F11> :s/^/\#/<CR>:nohlsearch<CR>
+  map <F12> :s/^\#//<CR>:nohlsearch<CR>
+endfunction
+
+function! s:Regular_Comment()
+  " replace le debut de ligne par #
+  map <F11> :s/^/\#/<CR>:nohlsearch<CR>
+  map <F12> :s/^\#//<CR>:nohlsearch<CR>
+endfunction
+
+function! s:Make_Comment()
+  " replace le debut de ligne par #
+  map <F11> :s/^/\#/<CR>:nohlsearch<CR>
+  map <F12> :s/^\#//<CR>:nohlsearch<CR>
+  set noexpandtab " add noexpandtab
+endfunction
+
+" F4 pour passer en mode "code copiable".
+map <F4> :call ToggleCopyPasteOn()<CR>
+
+function ToggleCopyPasteOff()
+    q
+    set list
+    set mouse=a
+    set number
+    map <F4> :call ToggleCopyPasteOn()<CR>
+endfunction
+
+function ToggleCopyPasteOn()
+    tabe %
+    set nolist
+    set mouse=r
+    set nonumber
+    map <F4> :call ToggleCopyPasteOff()<CR>
+endfunction
+
+" tabs and buffer navigation
+map <F5> :tabe<CR>:40vs<bar>:VTreeExplore<CR><C-w><C-w>
+map <F6> :bprevious<CR>
+map <F7> :bnext<CR>
+
+" open VTreeExplorer in a tab
+" map <F8> :40vs<bar>:VTreeExplore<CR><C-w><C-w>
+
+" retab and remove trailing spaces
+map <F9> :retab!<bar>%s/\s\+$<CR>
+
+" press F10 to switch to paste mode (to paste text on vim)
+set pastetoggle=<F10>
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Backup
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set backup " autorise vi a sauvegarder
+" on veut sauvegarder les fichiers dans un repertoire a part
+if filewritable(expand("~/.vim/backup")) == 2
+  set backupdir=$HOME/.vim/backup
+else
+  if has("unix") || has("win32unix")
+    call system("mkdir $HOME/.vim/backup -p") "on cree le repertoire s'il n'existe pas
+    set backupdir=$HOME/.vim/backup
+  endif
+endif
+
+
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Souris et curseur
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set mouse=a   " active la souris (si le terminal le peut, marche pas en ssh)"
+set term=rxvt " il faut indiquer le bon terminal pour que la souris fonctionne meme over ssh
+set mousehide " cache la souris
+set ruler     " affiche la position du curseur
+set showmatch " deplacer curseur pour montrer la correspondance entre les ( { [
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Completion
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set wildmenu
+set wildmode =list:longest,list:full
+set wildignore =*.o,*.r,*.so,*.sl,*.tar,*.tgz
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Langage C
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+let c_comment_strings=1 " Highlight les strings dans les commentaires en C
+set cindent
+set cinwords="if,else,while,do,for,switch"
+
+" complete les #i par des include
+iab   #i #include
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" syntax files
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+au BufNewFile,BufRead *_[0-9]\{6\}_[0-9]\{6\},mon???.err,stdTest.trc,*_link,mon???err.log,*log_otf_*,*log_sei_*,stat???log,debug*.log setf amadeuslogs
+au BufNewFile,BufRead *.less set filetype=less
+au BufNewFile,BufRead *.ejs set filetype=ejs
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Others
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+set modeline
+
+" reduire automatiquement les blocs de code
+function! MyFoldFunction()
+        let line = getline(v:foldstart)
+        let sub = substitute(line,'/\*\|\*/\|^\s+', '', 'g')
+        let lines = v:foldend - v:foldstart + 1
+        return v:folddashes.sub.'...'.lines.' Lines...'.getline(v:foldend)
+endfunction
+
+"set  foldmethod  =syntax     "Reduira automatiquement les fonctions et blocs (#region en C# par exemple)
+"set  foldtext =MyFoldFunction()    "on utilise notre fonction (optionnel)
+
+
+
+    """"""""""""" cscope bindings (thx to A. Huillet)
+    "
+    " The following maps all invoke one of the following cscope search types:
+    "
+    "   's'   symbol: find all references to the token under cursor
+    "   'g'   global: find global definition(s) of the token under cursor
+    "   'c'   calls:  find all calls to the function name under cursor
+    "   't'   text:   find all instances of the text under cursor
+    "   'e'   egrep:  egrep search for the word under cursor
+    "   'f'   file:   open the filename under cursor
+    "   'i'   includes: find files that include the filename under cursor
+    "   'd'   called: find functions that function under cursor calls
+    "
+    " Below are three sets of the maps: one set that just jumps to your
+    " search result, one that splits the existing vim window horizontally and
+    " diplays your search result in the new window, and one that does the same
+    " thing, but does a vertical split instead (vim 6 only).
+    "
+    " I've used CTRL-\ and CTRL-@ as the starting keys for these maps, as it's
+    " unlikely that you need their default mappings (CTRL-\'s default use is
+    " as part of CTRL-\ CTRL-N typemap, which basically just does the same
+    " thing as hitting 'escape': CTRL-@ doesn't seem to have any default use).
+    " If you don't like using 'CTRL-@' or CTRL-\, , you can change some or all
+    " of these maps to use other keys.  One likely candidate is 'CTRL-_'
+    " (which also maps to CTRL-/, which is easier to type).  By default it is
+    " used to switch between Hebrew and English keyboard mode.
+    "
+    " All of the maps involving the <cfile> macro use '^<cfile>$': this is so
+    " that searches over '#include <time.h>" return only references to
+    " 'time.h', and not 'sys/time.h', etc. (by default cscope will return all
+    " files that contain 'time.h' as part of their name).
+
+
+    " To do the first type of search, hit 'CTRL-\', followed by one of the
+    " cscope search types above (s,g,c,t,e,f,i,d).  The result of your cscope
+    " search will be displayed in the current window.  You can use CTRL-T to
+    " go back to where you were before the search.
+    "
+if has("cscope")
+    set csprg=/usr/bin/cscope
+    set csto=0
+    set cst
+map <C-left> :bprev
+    set nocsverb
+    if filereadable("cscope.out")
+                    cs add cscope.out
+    endif
+
+    set csverb
+
+"   cs add ~/cscope.out
+
+    " raccourci CTRL+r pour raffraichir la liste des symboles de cscope
+    "nmap <C-r> :!find ~/bullxmpi/bullmpi-dev -iname '*.c' -o -iname '*.cpp' -o -iname '*.h' -o -iname '*.hpp' > ~/cscope.files<CR>
+    "  \ :cs kill -1 <CR>
+    "  \ :!cscope -b -i ~/cscope.files -f ~/cscope.out<CR>
+    "  \ :cs add ~/cscope.out<CR>
+
+
+
+    function CScope_Refresh()
+        cs kill 0
+        !find $PWD -name \*.[ch] > files && cscope -b -i files
+        cs add cscope.out
+        !rm files
+    endfunction
+
+    map g<C-]> :cs find s <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>s :cs find s <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>g< :cs find g <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>t :cs find t <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>c :cs find c <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>e :cs find e <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>f :cs find f <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>i :cs find i <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@>d :cs find d <C-R>=expand("<cword>")<CR><CR>
+
+    " Using 'CTRL-spacebar' (intepreted as CTRL-@ by vim) then a search type
+    " makes the vim window split horizontally, with search result displayed in
+    " the new window.
+    "
+    " (Note: earlier versions of vim may not have the :scs command, but it
+    " can be simulated roughly via:
+    "    nmap <C-@>s <C-W><C-S> :cs find s <C-R>=expand("<cword>")<CR><CR>
+
+    nmap <C-@><C-@>s :scs find s <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>g :scs find g <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>t :scs find t <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>c :scs find c <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>d :scs find d <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>e :scs find e <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>f :scs find f <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@>i :scs find i <C-R>=expand("<cword>")<CR><CR>
+
+
+    " Hitting CTRL-space *twice* before the search type does a vertical
+    " split instead of a horizontal one (vim 6 and up only)
+    "
+    " (Note: you may wish to put a 'set splitright' in your .vimrc
+    " if you prefer the new window on the right instead of the left
+
+    nmap <C-@><C-@><C-@>s :vert scs find s <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>g :vert scs find g <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>t :vert scs find t <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>c :vert scs find c <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>d :vert scs find d <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>e :vert scs find e <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>f :vert scs find f <C-R>=expand("<cword>")<CR><CR>
+    nmap <C-@><C-@><C-@>i :vert scs find i <C-R>=expand("<cword>")<CR><CR>
+
+
+    " Commands to shorten "cs find ..." things
+    comm! -nargs=1 S :cs find s <args>
+    comm! -nargs=1 T :cs find t <args>
+    comm! -nargs=1 E :cs find e <args>
+    comm! -nargs=1 F :cs find f <args>
+    comm! -nargs=1 G :cs find g <args>
+    comm! -nargs=0 D :cs show
+    comm! -nargs=0 K :cs kill 0
+    comm! -nargs=0 R call CScope_Refresh()
+endif
+

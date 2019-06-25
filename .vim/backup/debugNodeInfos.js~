@@ -1,0 +1,30 @@
+const swal = require('sweetalert2');
+const _ = require('lodash');
+const JSONEditor = require('@dualbox/dualbox-lib-jsoneditor');
+
+var TemplateBinds = function(view, div, data) {
+    var node = data.node;
+    var pkg  = node.getPackage();
+    var editor = null;
+
+    div.ready(() => {
+        // bind the json editor
+        editor = new JSONEditor(div.find('.json-editor')[0], { modes: ['tree', 'code', 'text' ]});
+        editor.set({});
+
+        div.find('button[data-toggle="tooltip"]').tooltip();
+
+        div.find('.btn-displayValue').click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            var modal = div.find('.debug-json-modal');
+            modal.modal('show');
+
+            var value = $(this).attr('data-value');
+            editor.set((value && JSON.parse(value)) || {});
+        });
+    });
+};
+
+module.exports = TemplateBinds;

@@ -1,0 +1,67 @@
+var description = require('./package.json');
+var DualBox = require('@dualbox/dualbox');
+
+var File = require('@dualbox/dualbox-type-file');
+var JSZip = require('@dualbox/dualbox-lib-jszip');
+
+var getFileInZip = function(file, callback){
+    JSZip.loadAsync(file.getData()).then(
+        function (zip) {
+            // Auto find the file in zip.
+            // Note that this module works on zip file only
+            // if there is no more than 1 file.
+            var fn = "";
+            zip.forEach(function (relativePath, file){
+                fn = relativePath;
+            });
+            var f = zip.file(fn);
+            var fext = fn.split('.').pop().toLowerCase();
+
+            f.async("ArrayBuffer").then(
+                function(data){
+                    callback(data,"ArrayBuffer", fext);
+                }
+            );
+        }
+    ).catch(
+        function(reason) {
+            throw new DualBox.errors.RuntimeError('Cannot read zip file ('+ file.getName() + ') : Zip load has been rejected : '+reason+'.');
+        }
+    );
+};
+
+/**
+ *  A simple parsing module for dualbox
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var UnzipFile = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.setParallel(false);
+};
+
+UnzipFile.prototype = Object.create(DualBox.Module.prototype);
+UnzipFile.prototype.constructor = UnzipFile;
+
+// [Abstract] See DualBox.Module
+UnzipFile.prototype.compute = function(input, response){
+    this.debug( "Computing output of UnzipFile" );
+
+    if(input.file === null){
+        throw "unzip-file module cannot unzip a null file (node concerned : "+this.id+")";
+    }
+
+    if(input.file.getExtension().toLowerCase() !== "zip"){
+        throw "unzip-file module cannot unzip a file which is not a zip file (node concerned : "+this.id+")";
+    }
+
+    getFileInZip(input.file, function(data, type, ext){
+        var f = new File(data, ext, input.file.getName());
+        var output = {
+            file:f
+        };
+        response.send(output);
+    });
+};
+
+module.exports = UnzipFile;

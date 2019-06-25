@@ -1,0 +1,142 @@
+// Gulp has 5 APIs to learn
+// https://github.com/gulpjs/gulp/blob/master/docs/API.md
+"use strict";
+var fs = require('fs-extra');
+var path = require('path');
+var gulp = require('gulp');
+var util = require('util');
+var exec = require('gulp-exec');
+var server = require('gulp-express');
+var colors = require('colors');
+var argv = require('yargs').argv;
+
+var cp = require('child_process'); // contains exec, execSync, spawn, etc
+var onCtrlC = require('monitorctrlc');
+
+var endProcess = function() {
+    setTimeout(function() {
+        cp.exec('killall node');
+        process.exit(0);
+    }, 1000);
+}
+
+function execSync( cmd, options ) {
+    var output = cp.execSync(cmd, options);
+    if( output ) {
+        var outputStr = output.toString('utf8');
+        outputStr = outputStr.substr(0, outputStr.length-1); // remove the \n
+        return outputStr;
+    }
+    else {
+        return null;
+    }
+}
+
+gulp.task('help', function(cb) {
+    console.log('\nGulp tasks:\n');
+    console.log('run                 - run both meteor server and build server');
+    console.log('run-server          - run meteor server');
+    console.log('run-server-with-prod-settings - run local meteor connected to prod');
+    console.log('run-build-server    - run build server');
+    console.log('deploy              - Deploy build server and web app (takes a --phase argument: beta/prod)');
+    console.log('deploy-server       - deploy web app (takes a --phase argument: beta/prod)');
+    console.log('deploy-build-server - deploy build server');
+    console.log('import-database     - Copy production DB to local meteor (requires mongodump and mongorestore)');
+
+    cb();
+});
+
+gulp.task('run', ['run-build-server', 'run-server']);
+
+gulp.task('run-server', function(cb) {
+    var p = cp.execSync('meteor --port 4000 --settings settings.json', {
+        cwd: path.join( process.cwd(), 'web-server', 'app'),
+        stdio: [0, 1, 2],
+        env: util._extend(process.env, {
+            'LANG'                  : 'fr_FR.UTF-8',
+            'LC_ALL'                : 'fr_FR.UTF-8',
+            'ROOT_URL'              : 'http://localhost:4000',
+        }),
+    });
+});
+
+gulp.task('run-server-production', function(cb) {
+    var p = cp.execSync('meteor --extra-packages bundle-visualizer --production --port 4000 --settings settings.json', {
+        cwd: path.join( process.cwd(), 'web-server', 'app'),
+        stdio: [0, 1, 2],
+        env: util._extend(process.env, {
+            'LANG'                  : 'fr_FR.UTF-8',
+            'LC_ALL'                : 'fr_FR.UTF-8',
+            'ROOT_URL'              : 'http://localhost:4000',
+        }),
+    });
+});
+
+gulp.task('run-server-with-prod-settings', function(cb) {
+    var prodSettings = require('./web-server/.deploy/prod/mup.js').app.env;
+    delete prodSettings.ROOT_URL;
+    delete prodSettings.MAIL_URL;
+    var p = cp.execSync('meteor --port 4000 --settings settings.json', {
+        cwd: path.join( process.cwd(), 'web-server', 'app'),
+        stdio: [0, 1, 2],
+        env: util._extend(util._extend(process.env, prodSettings), {
+            'LANG'                  : 'fr_FR.UTF-8',
+            'LC_ALL'                : 'fr_FR.UTF-8',
+            'ROOT_URL'              : 'http://localhost:4000',
+        }),
+    });
+});
+
+gulp.task('run-build-server', function(cb) {
+    // Start the server at the beginning of the task
+    server.run(['build-server/server/index.js']);
+    // Restart the server when file changes
+    gulp.watch(['build-server/server/*.js'], {debounceDelay: 1000, mode: 'watch'}, server.run);
+});
+
+gulp.task('deploy-server', function(cb) {
+    if( argv.phase ) {
+        var phasePath = 'web-server/.deploy/' + argv.phase;
+    }
+    else {
+        console.error('You must set the phase argument (beta/prod)');
+        return;
+    }
+
+    console.log('[*] Deploying meteor application'.green);
+    cp.execSync('mup deploy --settings settings.json --verbose', { stdio: [0,1,2], cwd: phasePath  });
+    cb();
+});
+
+gulp.task('deploy-build-server', function(cb) {
+    console.log('[*] Deploying build server'.green);
+    cp.execSync('./deploy.sh', { cwd: path.join(process.cwd(), 'build-server'), stdio: [0, 1, 2] });
+    cb();
+});
+
+gulp.task('deploy', ['deploy-build-server', 'deploy-server']);
+
+gulp.task('import-database', function(cb) {
+    console.log('[*] finding production settings'.green);
+    var settings = require( path.join( process.cwd(), 'web-server', '.deploy', 'prod', 'mup') );
+
+    console.log('[*] Creating backup folder'.green);
+    var backupDir = path.join( process.cwd(), 'backup');
+    fs.ensureDir( backupDir );
+
+    console.log('[*] Dumping production database...'.green);
+    var cmd = 'mongodump --uri=' + settings.app.env.MONGO_URL.split('&')[0];
+    console.log(('[*] ' + cmd).gray);
+    execSync(cmd, { cwd: backupDir, stdio: 'inherit' });
+
+    // rename the database name from "dualbox" to "meteor"
+    fs.renameSync( path.join(backupDir, "dump", "dualbox"), path.join(backupDir, "dump", "meteor") );
+
+    console.log('[*] Restoring to local mongo...'.green);
+    var cmd = 'mongorestore --uri mongodb://127.0.0.1:4001/meteor --drop --bypassDocumentValidation';
+    console.log(('[*] ' + cmd).gray);
+    execSync(cmd, { cwd: backupDir, stdio: 'inherit' });
+
+    console.log('[*] deleting backup directory...'.green);
+    fs.remove(backupDir, cb);
+});

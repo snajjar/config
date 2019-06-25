@@ -1,0 +1,124 @@
+const EventEmitter = require('events');
+const UIComponent = require('./UIComponent');
+const errors = require('../Errors');
+const env = require('../Env.js');
+const _ = require('lodash');
+
+
+class Widget3D extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options);
+
+        this.canvas3d = null;
+
+        this.free = true;
+        this.disabled = false;
+        this.visible = true;
+    }
+
+    // Should be called by the canvas3d once it is initialized.
+    initialize() {
+        if(!this.initialized && this.canvas3d && this.canvas3d.isInitialized()){
+            super.initialize();
+            this.init3D();
+            this.initialized = true;
+        }
+    }
+
+    // to be reimplemented by children classes,
+    // will be called when registering to a canvas
+    init3D() {
+    }
+
+    checkRegistering(){
+        if(this.canvas3d === null){
+            this.error("canvas3d is not registered for this Widget3D.")
+            return false;
+        }else{
+            return true;
+        }
+    }
+
+    registerTo(n) {
+        this.canvas3d = n;
+        n.registerWidget3D(this);
+
+        // Bind to canvas events
+        var evts = this.appDesc.attr ? this.appDesc.attr.mouse : undefined;
+        if(evts === undefined){
+            console.warn("WARNING : no mouse event is defined for widget3D " + this.id);
+            evts = [];
+        }
+        var that = this;
+        Object.keys(evts).forEach(function (key) {
+            for(var i=0; i<evts[key].length; ++i){
+                that.canvas3d.on(
+                    that,
+                    key,
+                    (function(){
+                        var ii = i; // set in closure to keep loop value
+                        var kk = key;
+                        return function(event){
+                            if(that.free && !that.disabled && that.visible){
+                                event.cvs3dEvent.stopPropagation();
+                                that[evts[kk][ii]](event);
+                            }
+                        };
+                    })()
+                );
+            }
+        });
+    }
+
+    // When enslaved, the widgets will stop capturing events
+    // so that the master widget can handle everything.
+    setSlave(){
+        this.free = false;
+    }
+
+    setFree(){
+        this.free = true;
+    }
+
+    disable(){
+        this.disabled = true;
+    }
+
+    enable(){
+        this.disabled = false;
+    }
+
+    hide(){
+        this.visible = false;
+    }
+
+    show(){
+        this.visible = true;
+    }
+
+};
+
+// Those functions are useful to process this.attr and define some complex bindings.
+// push an element in an obj which is a dictionnary of arrays.
+// The function does obj[key].push(val), and create obj[key] if needed.
+Widget3D.pushArrObjVal = function(obj,key,val){
+    if(!obj[key]){
+        obj[key] = [];
+    }
+    obj[key].push(val);
+};
+// remove an index of an array in a dictionnary of array.
+Widget3D.rmIdxInArrObj = function(obj,key,i){
+    var arr = obj[key];
+    if(arr && arr.length !== 0){
+        for(var k=i; k<arr.length; ++k){
+            arr[k] = arr[k+1];
+        }
+        arr.length = arr.length-1;
+        if(arr.length === 0){
+            delete obj[key];
+        }
+    }
+};
+
+module.exports = Widget3D;

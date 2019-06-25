@@ -1,0 +1,111 @@
+Template.LandingPage.onRendered(function() {
+    var self = this;
+    this.loaded = false;
+    this.autorun(function() {
+        // define the load app function
+        self.load = function() {
+            if( !self.loaded ) {
+                var loadApp = function() {
+                    DualBox.load({
+                        "app"  : "stones-ring",
+                        "phase": "production",
+                        "loaderDiv": $('.app'),
+                        "endpoint": Meteor.absoluteUrl()
+                        //"endpoint" : "https://dualbox.com/"
+                    }, function() {
+                        window.app = DualBox.start({
+                            "logLevel": "warn",
+                            "profiler": "false",
+                            "div" : $('.app'),
+                        });
+                        window.app.start();
+                    });
+                }
+
+                if( window.DualBox ) {
+                    // loadapp.js has already been added
+                    loadApp();
+                }
+                else {
+                    (function(callback) {
+                        var s = document.createElement('script');
+                        s.setAttribute( 'src', Meteor.absoluteUrl("loadapp.js"));
+                        s.onload=callback; document.body.appendChild( s );
+                    })(function() {
+                        loadApp();
+                    });
+                }
+
+                self.loaded = true;
+            }
+        }
+
+        self.load();
+    });
+
+    // change the h1 text
+    var i = 0;
+    setInterval(function() {
+        i++;
+        switch( i%4 ) {
+        case 0:
+            $('.improvement').text('BRANDING');
+            break;
+        case 1:
+            $('.improvement').text('SALE PRICE');
+            break;
+        case 2:
+            $('.improvement').text('REVENUES');
+            break;
+        default:
+        }
+    }, 2000);
+
+    $(window).scroll(function(event) {
+        $('.come-in').each(function(i, el) {
+            var el = $(el);
+            if (el.visible(true)) {
+                el.addClass("come-in");
+            }
+        });
+    });
+});
+
+Template.LandingPage.events({
+    "click .btn-i-want-that": function(e, t) {
+        $('html, body').animate( { scrollTop: $("#choose-formula").offset().top }, 750 );
+        return false;
+    }
+});
+
+(function($) {
+
+  /**
+   * Copyright 2012, Digital Fusion
+   * Licensed under the MIT license.
+   * http://teamdf.com/jquery-plugins/license/
+   *
+   * @author Sam Sehnert
+   * @desc A small plugin that checks whether elements are within
+   *     the user visible viewport of a web browser.
+   *     only accounts for vertical position, not horizontal.
+   */
+
+  $.fn.visible = function(partial) {
+
+      var $t            = $(this),
+          $w            = $(window),
+          viewTop       = $w.scrollTop(),
+          viewBottom    = viewTop + $w.height(),
+          _top          = $t.offset().top,
+          _bottom       = _top + $t.height(),
+          compareTop    = partial === true ? _bottom : _top,
+          compareBottom = partial === true ? _top : _bottom;
+
+    return ((compareBottom <= viewBottom) && (compareTop >= viewTop));
+
+  };
+
+})(jQuery);
+
+

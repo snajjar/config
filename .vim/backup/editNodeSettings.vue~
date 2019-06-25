@@ -1,0 +1,735 @@
+<style>
+    .edit-dualbox-node-id {
+        margin-bottom: 0px;
+        display: inline-block;
+    }
+
+    .edit-dualbox-node-package-name {
+        font-style: italic;
+    }
+
+    .btn-edit-dualbox-node-name {
+        display: inline-block;
+        margin-left: 5px;
+        margin-top: -10px;
+        position: relative;
+        top: -10px;
+        vertical-align: bottom;
+    }
+
+    .module-left-description {
+        padding-top: 30px;
+        font-size: 12px;
+        text-align: center;
+    }
+
+    .card-settings .card-body {
+        font-size: 12px;
+        padding-left: 5px;
+        padding-right: 5px;
+    }
+
+    .table-desc {
+        width: 100%;
+    }
+
+    .table-desc thead td {
+        margin-right: 6px;
+    }
+
+    .table-desc tbody td {
+        margin-right: 6px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        height: 40px;
+    }
+
+    .card-header[data-toggle="collapse"] {
+        cursor: pointer;
+    }
+
+    .card-header[data-toggle="collapse"] h5 {
+        user-select: none;
+    }
+
+    .card-header[data-toggle="collapse"]:hover .btn-link {
+        text-decoration: none;
+    }
+
+    .dualbox-node-name-input {
+        display: inline-block;
+        max-width: 270px;
+        border-radius: 4px;
+        padding: 4px 8px 4px 8px;
+        font-size: 20px;
+    }
+
+    .text-value, .number-value, .boolean-value {
+        max-width: 140px;
+    }
+
+    .event-if, .event-data {
+        max-width: 80px;
+    }
+
+    .select-event-target, .select-event-name, .event-if, .event-data {
+        font-size: 12px;
+    }
+
+    .edit-body {
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: calc(100% - 80px);
+    }
+</style>
+
+<template>
+    <div class="edit-node-panel h100" id="edit-node-panel" :key="n.id">
+        <div style="padding-left: 10px; padding-top: 10px; padding-right: 10px;">
+            <h2 class="edit-dualbox-node-id">
+                <div v-if="nowEditingNodeName" class="dualbox-node-name-edit">
+                    <input type="text" class="form-control dualbox-node-name-input" style="display: inline-block;" :value="n.graphId" :data-type="n.type" @keypress="changeNodeName" autofocus/>
+                    <button class="btn btn-primary btn-save-node-name-change" :data-id="n.graphId" data-type="n.type" style="display: inline-block;" @click="saveNodeName">Save</button>
+                </div>
+                <div v-else class="dualbox-node-name">
+                    <span class="text-truncate d-inline-block" style="width: 290px">{{n.graphId}}</span>
+                    <button class="btn btn-light btn-sm btn-edit-dualbox-node-name" @click="editNodeName"><i class="fa fa-edit"></i></button>
+                </div>
+            </h2>
+            <p><small class="edit-dualbox-node-package-name">{{n.getPackageName()}}</small></p>
+        </div>
+
+        <div class="edit-body">
+            <div class="card">
+                <div class="card-header" id="dualbox-node-desc" data-toggle="collapse" data-target="#dualbox-node-desc-collapse" aria-expanded="true" aria-controls="dualbox-node-desc-collapse">
+                    <h5 class="mb-0 btn-link">Description</h5>
+                </div>
+
+                <div id="dualbox-node-desc-collapse" class="collapse show" aria-labelledby="dualbox-node-desc" data-parent="#edit-node-panel">
+                    <div class="card-body" style="padding-left: 15px;">
+                        <div class="module-left-signature">
+                            <graph-node :id="n.id" :example="true" :pkg="n.getPackage()" :n="createExampleNode(n)"></graph-node>
+                        </div>
+                        <p class="module-left-description">
+                            <span v-if="n.isInput()">{{ n.getDescription() || "Input [No description available]" }}</span>
+                            <span v-else-if="n.isOutput()">{{ n.getDescription() || "Output [No description available]" }}</span>
+                            <span v-else-if="n.isMetanode()">
+                                {{ n.getDescription() }}
+                                <a v-if="n.getDescription()" href="#" class="edit-module-description" @click="editModuleDescription">edit description</a>
+                                <a v-else href="#" class="edit-module-description" @click="editModuleDescription" :data-desc="n.getDescription()">Add a description</a>
+                            </span>
+                            <span v-else>
+                                {{ n.getPackage().description || "[No description available]" }}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card card-settings">
+                <div class="card-header" id="dualbox-node-comments" data-toggle="collapse" data-target="#dualbox-node-comments-collapse" aria-expanded="false" aria-controls="dualbox-node-comments-collapse">
+                    <h5 class="mb-0 btn-link">Comments</h5>
+                </div>
+                <div id="dualbox-node-comments-collapse" class="collapse" aria-labelledby="dualbox-node-comments" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <div style="padding-left: 15px; padding-right: 15px;">
+                            <p v-if="n.hasComment()" class="node-comment-text">{{ n.getComment() }}</p>
+                            <a v-if="!nowEditingComment" href="#" class="add-node-comment" @click="editComment">Add/edit comment</a>
+                            <div v-else="nowEditingComment" class="node-comment-edit">
+                                <textarea class="node-comment" rows=4 style="width: 100%;" :data-id="n.id" v-model="comment">
+
+                                </textarea>
+                                <div style="text-align: right; margin-top: 10px;">
+                                    <button class="btn btn-sm btn-secundary" @click="deleteComment">Delete</button>
+                                    <button class="btn btn-sm btn-primary btn-save-comment" @click="saveComment">Save</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compute options -->
+            <div v-if="n.isModule()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-compute-collapse" aria-expanded="false" aria-controls="dualbox-node-compute-collapse">
+                    <h5 class="mb-0 btn-link">Compute options</h5>
+                </div>
+                <div id="dualbox-node-compute-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <div class="form-group" style="padding-left: 20px;">
+                            <div>
+                                <label>
+                                    <input class="input-cache-toggle" type="checkbox" v-bind:checked="n.hasCacheActivated()" @change="toggleCache">
+                                    <span>Cache result <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="top" title="Keep the result in memory (the cache) to avoid computing this box every-time its result is required. The cache will be invalidated if an input prior to this box is changed." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button></span>
+                                </label>
+                            </div>
+
+                            <div v-if="n.isMetanode()">
+                                <label>
+                                    <input class="input-worker-toggle" type="checkbox" v-bind:data-id="n.id" v-bind:checked="n.isParallel()" @change="toggleWorker()" />
+                                    <span>Execute in a worker <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="top" title="Workers are separate contexts of executions that can execute long-running tasks without blocking the browser execution. Use this for heavy computations." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button></span><br/><span v-if="isParallel" class="text-danger worker-warning" v-show="n.isParallel()">Due to some technical limitations, this will only affect the built bundle. Please run tests on the built bundle as well.</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Widget options -->
+            <div v-if="n.isWidget()" class="card card-default">
+                <div class="card-header" id="dualbox-node-widget" data-toggle="collapse" data-target="#dualbox-node-widget-collapse" aria-expanded="false" aria-controls="dualbox-node-widget-collapse">
+                    <h5 class="mb-0 btn-link">Widget Options</h5>
+                </div>
+                <div id="dualbox-node-widget-collapse" class="collapse" aria-labelledby="dualbox-node-widget" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <span>Widget registered to: </span>
+                        <select class="form-control form-control-sm select-widget-registerTo" style="max-width: 250px;" @change="registerToWidget">
+                            <option value="">none</option>
+                            <option v-for="target in getSpecialUINodes()" :key="'target-'+target.id" :value="target.graphId" :selected="n.getWidgetRegistration() == target.graphId">{{target.id}}</option>
+
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inputs -->
+            <div v-if="n.isInput()" class="card card-default">
+                <div class="card-header" id="dualbox-node-default" data-toggle="collapse" data-target="#dualbox-node-default-collapse" aria-expanded="false" aria-controls="dualbox-node-default-collapse">
+                    <h5 class="mb-0 btn-link">Default value</h5>
+                </div>
+                <div id="dualbox-node-default-collapse" class="collapse" aria-labelledby="dualbox-node-default" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <span>Default value:</span>
+                        <span><display-value :n="n" :v="n.getDefaultValue()" type="default"></display-value></span>
+                    </div>
+                </div>
+            </div>
+            <div v-else-if="n.hasInputs()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-inputs-collapse" aria-expanded="false" aria-controls="dualbox-node-inputs-collapse">
+                    <h5 class="mb-0 btn-link">Inputs <small><span class="badge badge-secondary">{{n.getInputsNames().length}}</span></small></h5>
+                </div>
+                <div id="dualbox-node-inputs-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Input</th>
+                                <th>Visible</th>
+                                <th>Type</th>
+                                <th>Default</th>
+                            </thead>
+                            <tbody>
+                                <tr v-for="key in n.getInputsNames()" :key="'input-'+key">
+                                    <td>
+                                        {{key}}
+                                        <button v-if="n.hasInputDesc(key)" type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" v-bind:title="n.getInputDesc(key)" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                    </td>
+                                    <td>
+                                        <input class="input-visibility-toggle" type="checkbox" v-bind:data-id="n.id" v-bind:data-input="key" v-bind:checked="n.isInputVisible(key)" @change="toggleInputVisibility">
+                                    </td>
+                                    <td><span class="badge badge-secondary">{{ n.getInputType(key) }}</span></td>
+                                    <td><display-value :n="n" :v="n.getInputDefaultValue(key)" type="input" :name="key"></display-value></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Outputs -->
+            <div v-if="n.hasOutputs()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-outputs" data-toggle="collapse" data-target="#dualbox-node-outputs-collapse" aria-expanded="false" aria-controls="dualbox-node-outputs-collapse">
+                    <h5 class="mb-0 btn-link">Outputs <small><span class="badge badge-secondary">{{n.getOutputsNames().length}}</span></small></h5>
+                </div>
+                <div id="dualbox-node-outputs-collapse" class="collapse" aria-labelledby="dualbox-node-outputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Output</th>
+                                <th>Type</th>
+                                <th>Visible</th>
+                            </thead>
+                            <tbody>
+                                <tr v-for="key in n.getOutputsNames()" :key="'output-'+key">
+                                    <td>{{key}}
+                                        <button v-if="n.hasOutputDesc(key)" type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" v-bind:title="n.getOutputDesc(key)" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                    </td>
+                                    <td><span class="badge badge-secondary">{{n.getOutputType(key)}}</span></td>
+                                    <td>
+                                        <input class="output-visibility-toggle" type="checkbox" v-bind:data-id="n.id" v-bind:data-output="key" v-bind:checked="n.isOutputVisible(key)" @change="toggleOutputVisibility">
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attributes -->
+            <div v-if="n.hasAttributes()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-attrs" data-toggle="collapse" data-target="#dualbox-node-attrs-collapse" aria-expanded="false" aria-controls="dualbox-node-attrs-collapse">
+                    <h5 class="mb-0 btn-link">Attributes <small><span class="badge badge-secondary">{{n.getAttributesNames().length}}</span></small></h5>
+                </div>
+                <div id="dualbox-node-attrs-collapse" class="collapse" aria-labelledby="dualbox-node-attrs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped">
+                            <thead class="thead-dark">
+                                <th>Output</th>
+                                <th>Type</th>
+                                <th>Value</th>
+                            </thead>
+                            <tbody>
+                                <tr v-for="key in n.getAttributesNames()" :key="'attr-'+key">
+                                    <td>{{key}}
+                                        <button v-if="n.hasAttributeDesc(key)" type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" :title="n.getAttributeDesc(key)" style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                                    </td>
+                                    <td><span class="badge badge-secondary">{{ n.getAttributeType(key) }}</span></td>
+                                    <td><display-value :n="n" :v="n.getAttributeValue(key)" type="attr" :name="key"></display-value></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Loops -->
+            <div v-if="n.hasInputs()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-inputs" data-toggle="collapse" data-target="#dualbox-node-loops-collapse" aria-expanded="false" aria-controls="dualbox-node-loops-collapse">
+                    <h5 class="mb-0 btn-link">Loops <small><span class="badge badge-secondary">{{ n.hasLoop() ? "on" : "off" }}</span></small></h5>
+                </div>
+                <div id="dualbox-node-loops-collapse" class="collapse" aria-labelledby="dualbox-node-inputs" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <h4>Iterators
+                            <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="Iterators will break an array in input into a list of their components. The module will be computed several times, each time with one different component from every iterator input. Inputs that don't define iterators will use their current value as-is for the different computations." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                        </h4>
+                        <table class="table-desc table-striped">
+                            <tbody>
+                                <tr v-for="key in n.getInputsNames()" :key="'loop-iterator-'+key">
+                                    <td>{{key}}</td>
+                                    <td>
+                                        <input class="input-iterator-toggle" type="checkbox" :data-input="key" :checked="n.hasIterator(key)" @change="toggleIterator" />
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h4 class="mt-2">Feedback
+                            <button type="button" class="btn btn-transparent" data-toggle="tooltip" data-placement="right" title="Feedback (during a loop) is a reinjection of an output result of one iteration into an input of the next iteration." style="padding: 0;"><i class="text-info far fa-question-circle"></i></button>
+                        </h4>
+                        <table class="table-desc table-striped">
+                            <tbody>
+                                <tr v-for="key in n.getOutputsNames()" :key="'loop-feedback-'+key">
+                                    <td>{{key}}</td>
+                                    <td>
+                                        <select class="form-control form-control-sm select-output-feedback" :data-output="key" @change="selectOutputFeedback">
+                                            <option value="none">No feedback</option>
+                                            <option v-for="i in n.getInputsNames()" :value="i" :selected="n.getFeedback(key) == i" :key="'loop-feedback-input-'+i">{{i}}</option>
+                                        </select>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="n.isUI()" class="card card-settings">
+                <div class="card-header" id="dualbox-node-events" data-toggle="collapse" data-target="#dualbox-node-events-collapse" aria-expanded="false" aria-controls="dualbox-node-events-collapse">
+                    <h5 class="mb-0 btn-link">Events <small><span class="badge badge-secondary">{{n.getOutboundEvents().length}}</span></small></h5>
+                </div>
+                <div id="dualbox-node-events-collapse" class="collapse" aria-labelledby="dualbox-node-events" data-parent="#edit-node-panel">
+                    <div class="card-body">
+                        <table class="table-desc table-striped" style="font-size: 12px!important;">
+                            <thead class="thead-dark">
+                                <th>Target</th>
+                                <th>Event</th>
+                                <th>If</th>
+                                <th>Data</th>
+                                <th>Action</th>
+                            </thead>
+                            <tbody>
+                                <template v-if="n.hasOutEvents()">
+                                    <tr v-for="(evt, index) in n.getOutboundEvents()" :data-index="index" :key="'outevents-'+index">
+                                        <td>
+                                            <select v-if="evt.node" class="form-control form-control-sm select-event-target" :data-index="index"@change="selectEventTarget" >
+                                                <option v-for="node in getUINodesWithEvents()" :value="node.getGraphId()" :selected="node.getGraphId()==evt.node" :key="node.id">{{node.getGraphId()}}</option>
+                                            </select>
+                                            <span v-else>{{evt.selector}}</span>
+                                        </td>
+                                        <td>
+                                            <select class="form-control form-control-sm select-event-name" :data-index="index" @change="selectEventName">
+                                                <template v-if="evt.node">
+                                                    <option v-for="targetEvent in getTargetNodeEvents(evt.node)" :value="targetEvent" :selected="evt.event===targetEvent" :key="targetEvent">{{targetEvent}}</option>
+                                                </template>
+                                                <template v-else>
+                                                    <option value="hide">hide</option>
+                                                    <option value="show">show</option>
+                                                </template>
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <input class="form-control form-control-sm event-if" type="text" :data-index="index" :value="evt.if" @change="setEventIf" />
+                                        </td>
+                                        <td>
+                                            <input class="form-control form-control-sm event-data" type="text" :data-index="index" :value="evt.data" @change="setEventData" />
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-danger btn-editor-xs btn-remove-event" :data-index="index" @click="removeEvent">
+                                                <i class="fa fa-minus"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                                <tr>
+                                    <td colspan="5" style="padding-top: 0px; padding-bottom: 0px;">
+                                        <button class="btn btn-sm" :data-id="n.id" style="width: 100%;" @click="addEvent">Add event</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal edit-value-modal" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit value</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="set-type">
+                            <div class="form-check">
+                                <input type="radio" class="form-check-input set-value unset-value" id="unset-value" name="set-value" value="unset-value" checked>
+                                <label class="form-check-label" for="unset-value">
+                                    don't set a value
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="radio" class="form-check-input set-value set-value-null" id="set-value-null" name="set-value" value="set-value-null">
+                                <label class="form-check-label" for="set-value-null">
+                                    set null
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="radio" class="form-check-input set-value set-value-type" id="set-value-type" name="set-value" value="set-value-type" aria-label="Set a value of type">
+                                <div class="form-inline form-check-label" style="height: 24px;">
+                                    <label for="set-value-type">
+                                        set a value of type:
+                                        <select class="form-control choose-value-type d-inline-block form-control-sm ml-2">
+                                            <option value="string">String</option>
+                                            <option value="number">Number</option>
+                                            <option value="boolean">Boolean</option>
+                                            <option value="object">Object</option>
+                                            <option value="file">File</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <hr class="separator"/>
+                        <div class="has-value" style="display: none;">
+                            <div class="define-value define-boolean" style="display: none;">
+                                <div class="form-inline">
+                                    <label>Value: </label>
+                                    <select class="form-control form-control-sm bool-value d-inline-block ml-2">
+                                        <option value=true>True</option>
+                                        <option value=false>False</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="define-value define-file" style="display: none;">
+                                <div class="form-inline">
+                                    <label>File input</label>
+                                    <input type="file" class="form-control-file form-control-sm file-value">
+                                </div>
+                            </div>
+                            <div class="define-value define-number" style="display: none;">
+                                <div class="form-inline">
+                                    <label>Value: </label>
+                                    <input type="number" class="form-control form-control-sm number-value ml-2"/>
+                                </div>
+                            </div>
+                            <div class="define-value define-string" style="display: none;">
+                                <div class="form-inline">
+                                    <label>Value: </label>
+                                    <input type="text" class="form-control form-control-sm text-value ml-2"/>
+                                </div>
+                            </div>
+                            <div class="define-value define-object" style="display: none;">
+                                <label>Value: </label>
+                                <div class="json-editor" style="height: 400px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary btn-save">Save changes</button>
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+import _ from 'lodash';
+import DisplayValueVue from './displayValue.vue';
+import GraphNodeVue from './graphNode.vue';
+import JSONEditor from '@dualbox/dualbox-lib-jsoneditor';
+import swal from 'sweetalert2';
+
+export default {
+    props: [
+        "id",     // the GraphNode object
+    ],
+    components: {
+        "display-value" : DisplayValueVue,
+        "graph-node"    : GraphNodeVue
+    },
+    data: function () {
+        return {
+            comment: null,
+
+            // states
+            isParallel: false,
+            nowEditingComment: false,
+            nowEditingNodeName: false,
+        };
+    },
+    created: function() {
+        this.view = window.dualboxEditor.v;
+        this.n = this.view.m.getNode(this.id);
+
+        // fetch the comment for this node
+        this.comment = this.n.hasComment() ? this.n.getComment() : "";
+        this.isParallel = this.n.isParallel();
+    },
+    mounted: function() {
+        // adapt the style of the example graph node
+        // remove the "position: absolute;" that messes up the display
+        var card = $(this.$el).find('.module-left-signature .card');
+        card.css('position', 'static').css('point-events', 'none');
+        card.find('.point').css("visibibility", "visible").find('svg').css("visibibility", "visible");
+        card.ready(() => {
+            var width = Math.max(
+                card.find('.inputs').width() + card.find('.outputs').width() + 20,
+                card.find('.title').width() + 60,
+                card.find('.subtitle').width() + 40
+            );
+            card.css('width', width + 'px');
+            card.addClass('mx-auto');
+        });
+
+        // allow tooltips
+        $(this.$el).find('button[data-toggle="tooltip"]').tooltip();
+
+        // bind the json editor
+        editor = new JSONEditor($(this.$el).find('.json-editor')[0], { modes: ['tree', 'code', 'text' ]});
+        editor.set({});
+    },
+    beforeUpdate: function() {
+        console.log('[Updating] node-settings');
+    },
+    updated: function() {
+        console.log('[Updated] node-settings');
+        //this.n = this.view.m.getNode(this.id); // it breaks updating node name
+    },
+    methods: {
+        // for widget registration
+        getSpecialUINodes: function() {
+            var targets = this.n.m.getSpecialUINodes( this.n.getRegisterType() );
+            return targets;
+        },
+
+        getUINodesWithEvents : function() {
+            var nodes = this.n.m.getNodes("ui");
+            var eventNodes = nodes.filter( function(n) {
+                return n.getEventsNames().length > 0;
+            });
+            return eventNodes;
+        },
+
+        getTargetNodeEvents: function(nodeId) {
+            var targetNode = this.n.m.getNode(nodeId);
+            return targetNode.getEventsNames();
+        },
+
+        editComment: function(e) {
+            this.nowEditingComment = true;
+        },
+
+        saveComment: function(e) {
+            var val = $(this.$el).find('.node-comment').val();
+            this.view.c.setComment(this.n.id, val);
+            this.nowEditingComment = false;
+        },
+
+        deleteComment: function(e) {
+            this.view.c.deleteComment(this.n.id);
+            this.nowEditingComment = false;
+        },
+
+        addEvent: function(e) {
+            this.view.c.addEvent(this.n.id);
+        },
+
+        toggleInputVisibility: function(e) {
+            var inputName = $(e.target).data('input');
+            var visible = $(e.target).is(":checked");
+            if( !this.view.c.setInputVisibility(this.n.id, inputName, visible) ) {
+                // failed, reset this to old value
+                $(e.target).prop('checked', !visible);
+            }
+        },
+
+        toggleOutputVisibility: function(e) {
+            var outputName = $(e.target).data('output');
+            var visible = $(e.target).is(":checked");
+            if( !this.view.c.setOutputVisibility(this.n.id, outputName, visible) ) {
+                // failed, reset this to old value
+                $(e.target).prop('checked', !visible);
+            }
+        },
+
+        editNodeName: function(e) {
+            this.nowEditingNodeName = true;
+        },
+
+        changeNodeName: function(e) {
+            // user pressed enter
+            /* TO BE REDONE
+            if(e.which == 13 || e.keyCode == 13) {
+                var oldId = $(this).parent().find('.btn-save-node-name-change').data('id');
+                var newId = $(this).val();
+                var type = $(this).data('type');
+                this.view.c.renameBox(oldId, newId, type);
+                return false;
+            }
+            */
+        },
+
+        saveNodeName: function(e) {
+            var newId = $(e.target).parent().find('.dualbox-node-name-input').val();
+            var type = $(this).data('type');
+            this.view.c.renameBox(this.n.id, newId, type);
+            this.n = this.view.m.getNode(newId); // get the new node
+            this.nowEditingNodeName = false;
+        },
+
+        toggleIterator: function(e) {
+            var destInput = $(e.target).attr('data-input');
+            if( $(this).is(":checked") ) {
+                this.view.c.setIterator( this.n.id, destInput );
+            }
+            else {
+                this.view.c.unsetIterator( this.n.id, destInput );
+            }
+        },
+
+        registerToWidget: function(e) {
+            var targetId = $(e.target).val();
+            this.view.c.registerWidget(this.n.id, targetId);
+        },
+
+        selectOutputFeedback: function(e) {
+            var val = $(e.target).val();
+            var destOutput = $(e.target).attr('data-output');
+            if( val !== "none" ) {
+                this.view.c.setFeedback( this.n.id, destOutput, val );
+            }
+            else {
+                this.view.c.unsetFeedback( this.n.id, destOutput );
+            }
+        },
+
+        removeEvent: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            this.view.c.removeEvent( this.n.id, index );
+        },
+
+        setEventIf: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventIf( this.n.id, index, val );
+        },
+
+        setEventData: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventData( this.n.id, index, val );
+        },
+
+        // TODO: remake this into it's own vue
+        selectEventTarget: function(e) {
+            var target = $(e.target).val();
+
+            // change options of closest .select-event-name according to this new target
+            var targetNode = this.view.m.getNode(target);
+            var targetEvents = targetNode.getEventsNames();
+            var select = $(e.target).closest('tr').find('.select-event-name');
+            select.html('');
+            _.each(targetEvents, (eventName) => {
+                select.append( $('<option/>', {
+                    value: eventName
+                }).append(eventName));
+            });
+
+            var index = parseInt($(e.target).attr('data-index'));
+            view.c.setEventTarget( this.n.id, index, target );
+        },
+
+        selectEventName: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventName( this.n.id, index, val );
+        },
+
+        toggleCache: function(e) {
+            var val = $(e.target).is(':checked');
+            view.c.setBoxCache( this.n.id, val );
+        },
+
+        toggleWorker: function(e) {
+            var val = $(e.target).is(':checked');
+            this.view.c.setBoxParallel( this.n.id, val );
+            this.isParallel = val;
+        },
+
+        editModuleDescription: function(e) {
+            var desc = $(e.target).attr('data-desc');
+
+            swal({
+                title: "Describe what this metabox does",
+                input: "textarea",
+                inputValue: desc || "",
+                showCancelButton: true,
+                closeOnConfirm: false,
+                showLoaderOnConfirm: true,
+                animation: "slide-from-top",
+                inputPlaceholder: "This metabox..."
+            }).then( (result) => {
+                if (result.value === "") {
+                    swal.showInputError("You need to write something!");
+                    return false;
+                }
+                else {
+                    this.view.c.setMetanodeDescription(this.n.id, result.value);
+                }
+            });
+        },
+
+        createExampleNode(n) {
+            return this.view.m.createExampleNode(n.getPackage().name, n.id)
+        }
+    }
+}
+
+
+</script>

@@ -1,0 +1,311 @@
+var fs = require('fs-extra');
+var colors = require('colors');
+var cp = require('child_process');
+var path = require('path');
+var _ = require('lodash');
+var crypto = require('crypto');
+var async = require('async');
+var os = require('os');
+var shelljs = require('shelljs');
+var argv = require('yargs').argv;
+
+// version->hash dic
+var insoleTest = {
+    "insoles/insole-1.1.4.json" : {
+        hash: "e2025c194e526dd6cebed4ebf0e380e5c2b3c1b4",
+        extra: {
+            parameters: { patientName: "Mark Twain" },
+            hash: "e2025c194e526dd6cebed4ebf0e380e5c2b3c1b4"
+        }
+    },
+    "insoles/insole-1.1.5.json" : {
+        hash: "e2025c194e526dd6cebed4ebf0e380e5c2b3c1b4",
+        extra: {
+            parameters: { footsizeStr: "48" },
+            hash: "2deb5bda29d905d7697a4540bbafaddd05b12e41"
+        }
+    },
+    "insoles/insole-1.3.12.json" : {
+        hash: "560e056cdfb6428abece5fdbca26403a188f11eb",
+        extra: {
+            parameters: { degAngle: -1, thicknessStr: 2.5 },
+            hash: "960346340a2462c3d9b8f9da2ee2b803b8f599d5"
+        }
+    },
+    "insoles/insole-1.3.171.json" : {
+        hash: "8d17ad3dc1a0f365000f7c555152f394ce2787e7",
+        extra: {
+            parameters: { activeAntero: true, anteroPos01: 0.4, anteroPos02: 0.3 },
+            hash: "7e880bf05391a261ad5192a9c10207aa2126331d"
+        }
+    },
+    "insoles/insole-1.3.19.json" : {
+        hash: "89aa8fb155732899999a63b753a524f4dd686a4b",
+        extra: {
+            parameters: { activeAntero: true, anteroPos01: 0.4, anteroPos02: 0.3 },
+            hash: "c9ab6a4fb2cfd4bc49d58da868b21831197a224a"
+        }
+    },
+    "insoles/insole-1.3.7.json" : {
+        hash: "55a78b2254c2b48f80779a597eaeef37e197051d",
+        extra: {
+            parameters: { initials: "PAGE" },
+            hash: "52eeebaf105763d07f71a6c64eb589e7036bf9b9"
+        }
+    },
+    "insoles/insole-1.3.8.json" : {
+        hash: "ec5703ea795d1f1830d2685a49a6d1a46fa0f9cf",
+        extra: {
+            parameters: { productionId: "VER0001" },
+            hash: "8848466243c64a6595820b06438e5a2e6162900b"
+        }
+    },
+    "insoles/insole-1.4.3.json" : {
+        hash: "fe74806531d770493130f7dcb93d0254f0f21fbc",
+        extra: {
+            parameters: {
+                rigidities: {"E":4,"Dx":3,"Dy":3,"Dz":3,"C":4,"Fx":4,"Fy":4,"CenterH":3,"Bx":2,"By":2,"Bz":2,"G":2,"CenterB":5,"A":3}
+            },
+            hash: "388150abc32503b708836b16bec12ecf5136a036"
+        }
+    },
+    "insoles/insole-1.5.0.json" : {
+        hash: "b3485e0a548ff86c3a4501efa6c7d3a74c6d8000",
+        extra: {
+            parameters: { footWidthStr : "L" },
+            hash: "b3485e0a548ff86c3a4501efa6c7d3a74c6d8000"
+        }
+    },
+    "insoles/insole-1.6.2-anteroPos01-null.json": {
+        hash: "733e6e4c4379bba9ba63f5f4f75295af23051111",
+        extra: {
+            parameters: { coverSize : "42" },
+            hash: "733e6e4c4379bba9ba63f5f4f75295af23051111"
+        }
+    },
+    "insoles/insole-1.6.2.json" : {
+        hash: "d279d3986abbcac5b3b76cf264b87f2809fe7120",
+        extra: {
+            parameters: { anteroThick : "1.4" },
+            hash: "83cbe950567c800890119a5d0784a85f9cfe192a"
+        }
+    },
+    "insoles/insole-1.8.2-anteroPos01-null.json": {
+        hash: "334b5ed52e6d4ebdd60454bd2bcccb33b70cb9bc",
+        extra: {
+            parameters: { coverframe: true },
+            hash: "334b5ed52e6d4ebdd60454bd2bcccb33b70cb9bc"
+        }
+    },
+    "insoles/insole-1.8.2.json" : {
+        hash: "03a835041ed786e3df76f21db6a680f65ca14019",
+        extra: {
+            parameters: { eltHeight: 2 },
+            hash: "ce019d8241950c27f1299b80e8a1389f991cb3f8"
+        }
+    },
+
+    "coverage/Semelle1.json" : {
+        hash: {
+            "1.8.3": "1db791561167d9f6f8ab338c9244e2cdaaa1ecd8",
+            "1.9.1": "1db791561167d9f6f8ab338c9244e2cdaaa1ecd8"
+        }
+    },
+    "coverage/Semelle2.json" : {
+        hash: {
+            "1.8.3": "3a0fd2430ad2250cb8263e4336670b286f89da63",
+            "1.9.1": "64bb3e8875764aa50b9081a54d1dc8559c4751eb"
+        }
+    },
+    "coverage/Semelle3.json" : {
+        hash: {
+            "1.8.3": "081019725151fe17ec05f0b40218e871141004f5",
+            "1.9.1": "081019725151fe17ec05f0b40218e871141004f5"
+        }
+    },
+};
+
+var extraHash = {
+
+}
+
+function getHash(file) {
+    var hash = crypto.createHash("sha1");
+    if( !fs.existsSync(file) ) {
+        return null;
+    }
+    var str = fs.readFileSync(file, "utf8");
+    str = str.replace(/[\n\r]/g, ''); // avoid EOF/CLRF differences between win/unix systems while computing hashes
+    hash.update( str );
+    return hash.digest('hex');
+}
+
+function execSync(cmd, options) {
+    if( !options ) options = {};
+
+    var output = cp.execSync(cmd, options);
+    if( output ) {
+        var outputStr = output.toString('utf8');
+        outputStr = outputStr.substr(0, outputStr.length-1); // remove the \n
+        return outputStr;
+    }
+    else {
+        return null;
+    }
+}
+
+function exec(cmd, options = { silent: true }, cb) {
+    shelljs.exec(cmd, options, (code, stdout, stderr) => {
+        if( stdout.length && stdout[stdout.length-1] == '\n' ) {
+            stdout = stdout.substr(0, stdout.length - 1);
+        }
+        if( stderr.length && stdout[stderr.length-1] == '\n' ) {
+            stderr = stderr.substr(0, stderr.length - 1);
+        }
+
+        cb(code, stdout, stderr);
+    });
+}
+
+// insolePath: the path of the insole.stl file
+// extra: set of extra parameters
+// hash: the hash to match the result
+// next: a callback to be called when done (for async)
+function testInsoleGeneration(insolePath, extra, hash, next) {
+    var fileName = path.basename(insolePath);
+
+    if( !_.isEmpty(extra) ) {
+        var appName = "", appVersion = "";
+        var extraCmd = [];
+        _.each(extra, (paramValue, paramName) => {
+            if( paramName == "application" ) {
+                extraCmd.push("-a " + paramValue);
+                appName = paramValue;
+            }
+            else if( paramName == "version" ) {
+                extraCmd.push("-v " + paramValue);
+                appVersion = paramValue;
+            }
+            else {
+                if( typeof paramValue == "string" ) {
+                    extraCmd.push( "--input " + paramName + ":" + JSON.stringify(paramValue) );
+                }
+                else {
+                    extraCmd.push( "--input " + paramName + ":'" + JSON.stringify(paramValue) + "'" );
+                }
+            }
+        });
+        var ext = appName && appVersion ? "." + appName + "." + appVersion + ".stl" : ".stl";
+        var targetSTL = fileName.replace(path.extname(fileName), ext);
+        var cmd = "dpm run --input @" + insolePath + " " + extraCmd.join(" ") + " -o insoleSTL:@" + targetSTL;
+        var insoleString = insolePath + " with " + JSON.stringify(extra);
+    }
+    else {
+        var targetSTL = fileName.replace(path.extname(fileName), ".stl");
+        var cmd = "dpm run --input @" + insolePath + " -o insoleSTL:@" + targetSTL;
+        var insoleString = insolePath;
+    }
+
+    try {
+        console.log(cmd);
+        exec(cmd, { silent: true, stdio: 'ignore' }, (code, stdout, stderr) => {
+            var end = function() {
+                // clean the repo first
+                fs.removeSync('/tmp/dpmcache/sole-adapt/');
+            }
+
+            if( code === 0 ) {
+                var resultFileHash = getHash("./" + targetSTL);
+                if( !resultFileHash ) {
+                    console.error((targetSTL + ' generation error.').red);
+                    console.error("Please run for more info: " + cmd.yellow);
+                    console.error(stderr.red);
+                    next();
+                    return;
+                }
+
+                if( resultFileHash == hash ) {
+                    console.log('\n' + cmd.yellow);
+                    console.log(insoleString + ': ' + 'test success'.green);
+                    fs.removeSync(targetSTL);
+                }
+                else {
+                    console.log((insoleString + ' run success, but expected hash ' + hash +
+                        " and got " + resultFileHash).yellow);
+                    console.log('Please inspect: ' + targetSTL);
+                }
+                next();
+            }
+            else {
+                console.log((insoleString + ' test failed').red);
+                console.error("Please run for more info: " + cmd.yellow);
+                console.log(stderr.red);
+                next();
+            }
+        });
+    }
+    catch(e) {
+        console.error((insolePath + ' generation error: ' + e).red);
+        console.error("Please run for more info: " + cmd.yellow);
+        next();
+    };
+}
+
+/*
+console.log('\nTesting regular generations' + (argv.parallel ?  ' (run in parallel)' : ''));
+var insolesTestPath = "./insoles";
+fs.readdir(insolesTestPath, (err, files) => {
+    var concurrencyLimit = argv.parallel ? os.cpus().length + 1 : 1;
+    async.eachLimit(files, concurrencyLimit, function(file, next) {
+        var insoleTestPath = path.join(insolesTestPath, file);
+        console.log('insoleTestPath: ' + insoleTestPath);
+        testInsoleGeneration(insoleTestPath, null, insoleTest[insoleTestPath].hash, next);
+    }, () => {
+
+        console.log('\n\nTesting generations with extra parameters'  + (argv.parallel ?  ' (run in parallel)' : ''));
+        async.eachLimit(files, concurrencyLimit, function(file, next) {
+            var insoleTestPath = path.join(insolesTestPath, file);
+            var test = insoleTest[insoleTestPath];
+            if( test.extra ) {
+                testInsoleGeneration(insoleTestPath, test.extra.parameters, test.extra.hash, next);
+            }
+            else {
+                next();
+            }
+        });
+    });
+});
+*/
+
+console.log('\nTesting coverage of features (run in parallel)');
+var application = "sole-adapt";
+var versions = ["1.8.3", "1.9.1"];
+var insolesPath = "./coverage";
+
+fs.readdir(insolesPath, (err, files) => {
+    var tasks = [];
+    _.each(versions, (version) => {
+        _.each(files, file => {
+            tasks.push({
+                file: file,
+                app: "sole-adapt",
+                version: version
+            });
+        });
+    })
+
+    var concurrencyLimit = os.cpus().length + 1;
+    async.eachLimit(tasks, concurrencyLimit, function(task, next) {
+        if( task.file.endsWith('.json') ) {
+            var insolePath = path.join(insolesPath, task.file);
+            testInsoleGeneration(insolePath, { "application" : task.app, "version": task.version }, insoleTest[insolePath].hash[task.version], next);
+        }
+        else {
+            next();
+        }
+    }, () => {
+        console.log('\n All test done !'.green);
+    })
+})
+
+

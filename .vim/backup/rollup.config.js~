@@ -1,0 +1,55 @@
+import resolve from 'rollup-plugin-node-resolve';
+import commonjs from 'rollup-plugin-commonjs'
+import vue from 'rollup-plugin-vue'
+import embedCss from 'rollup-plugin-embed-css';
+import less from 'rollup-plugin-less';
+import replace from 'rollup-plugin-replace';
+import { eslint } from 'rollup-plugin-eslint';
+
+export default [
+{
+  // debug file (GraphEditor.js)
+  plugins: [
+    //eslint(),
+    embedCss(),
+    less({
+        insert: true,
+        output: false
+    }),
+    replace({
+      'process.env.NODE_ENV': JSON.stringify( 'production' )
+    }),
+    vue({ template: { compilerOptions: { pad: 'line' } }}),
+    resolve(),
+    commonjs(),
+  ],
+  external: ['vue'],
+  input: 'js/src/GraphEditor.js',
+  output: {
+    sourcemap: 'inline',
+    file: 'js/dist/GraphEditor.js',
+    format: 'cjs'
+  }
+},
+{
+  // prod file (GraphEditor.min.js)
+  plugins: [
+    embedCss(),
+    less({
+        insert: true,
+        output: false
+    }),
+    replace({
+      'process.env.NODE_ENV': JSON.stringify( 'production' )
+    }),
+    vue(),
+    resolve(),
+    commonjs(),
+  ],
+  external: ['vue'],
+  input: 'js/src/GraphEditor.js',
+  output: {
+    file: 'js/dist/GraphEditor.min.js',
+    format: 'cjs'
+  }
+}]

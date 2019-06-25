@@ -1,0 +1,124 @@
+var description = require('./package.json');
+var DualBox = require('@dualbox/dualbox');
+var XTHREE = require('@dualbox/dualbox-lib-xthree');
+var DualboxTypesAll3D = require('@dualbox/dualbox-type-all3d');
+
+var JSZip = require('jszip');
+
+/**
+ *  A simple conditional module for DualBox.
+ *  @constructor
+ *  @extends {DualBox.Module}
+ */
+var StandardCubeMapLoader = function(attrs){
+    DualBox.Module.call(this, description, attrs);
+    this.setParallel(false);
+};
+
+StandardCubeMapLoader.prototype = Object.create(DualBox.Module.prototype);
+StandardCubeMapLoader.prototype.constructor = StandardCubeMapLoader;
+
+
+// Use a fixed size for the final texture.
+// See later if this should be changed or iomproved, but for now it seems that
+// it is hardcoded into the PMREMCubeUVPacker
+var texture_size = 1024;
+
+// get the packed image as ImageData and DataURL,
+// size is the wanted resolution, default to 1024.
+var getPackedImage = function(renderer,texture, size){
+    var filter = XTHREE.NearestFilter;
+    var size = size !== undefined? size : texture_size;
+
+    var camera = new XTHREE.OrthographicCamera( -size/2, size/2, size/2, -size/2, -1000, 1000 );
+
+    var scene = new XTHREE.Scene();
+
+    var geometry = new XTHREE.PlaneGeometry( size, size );
+
+    texture.minFilter = filter;
+    texture.magFilter = filter;
+
+    var material = new XTHREE.MeshBasicMaterial( { map: texture} );
+    var plane = new XTHREE.Mesh( geometry, material );
+    scene.add(plane);
+
+    renderer.render(scene,camera);
+
+    // Does not work of course... What is the good parameter to get the context?
+    // var context = renderer.domElement.getContext('2d');
+
+    return {
+        //imgData:context.getImageData(0, 0, this.size, this.size),
+        dataURL:renderer.domElement.toDataURL()
+    };
+}
+
+// [Abstract] See DualBox.Module
+StandardCubeMapLoader.prototype.compute = function(input, response){
+    this.debug( "Computing output of StandardCubeMapLoader" );
+
+    var urls = [input.px, input.nx, input.py, input.ny, input.pz, input.nz];
+    var data_urls = [null, null, null, null, null, null];
+
+    var compute = function(){
+        new XTHREE.CubeTextureLoader().load(
+            data_urls,
+            function ( cubeMap ) {
+
+                var map_renderer = new XTHREE.WebGLRenderer();
+                map_renderer.setClearColor( 0xffffff );
+                map_renderer.setSize( texture_size, texture_size );
+
+                var pmremGenerator = new XTHREE.PMREMGenerator( cubeMap, 1024);
+                pmremGenerator.update( map_renderer );
+
+                var pmremCubeUVPacker = new XTHREE.PMREMCubeUVPacker( pmremGenerator.cubeLods );
+                pmremCubeUVPacker.update( map_renderer );
+
+                var baked_cubemap = getPackedImage(map_renderer,pmremCubeUVPacker.CubeUVRenderTarget.texture);
+                new XTHREE.TextureLoader().load( baked_cubemap.dataURL, function(res){
+                    res.mapping = XTHREE.CubeUVReflectionMapping;
+                    res.minFilter = XTHREE.LinearFilter;
+                    res.magFilter = XTHREE.LinearFilter;
+
+                    var output = {
+                        envMap:res,
+                        dataURL:baked_cubemap.dataURL
+                    };
+                    response.send(output);
+                });
+            }
+        );
+    };
+
+    // This code is here to avoid cross origin issues.
+    // and resize the image to ensure we have 256 resolution
+    var loaded = 0;
+
+    for(var i=0; i<urls.length; ++i){
+        var img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = urls[i];
+        img.onload = (function(){
+            var imgimg = img;
+            var ii = i;
+            return function(){
+                var canvas = document.createElement('canvas');
+                var context = canvas.getContext('2d');
+                canvas.width = texture_size/4; // imgimg.width;
+                canvas.height = texture_size/4; // imgimg.height;
+                context.drawImage(imgimg,0,0,canvas.width,canvas.height);
+                data_urls[ii] = canvas.toDataURL();
+                loaded++;
+                if(loaded === 6){
+                    compute();
+                }
+            }
+        })();
+    }
+
+};
+
+module.exports = StandardCubeMapLoader;
+

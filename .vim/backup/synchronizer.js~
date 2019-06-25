@@ -1,0 +1,29 @@
+import { UIComponent } from '@dualbox/dualbox';
+import { _ } from '@dualbox/dualbox-lib-lodash';
+var pkgDesc = require('../package.json');
+
+class Synchronizer extends UIComponent {
+    constructor(pkgDesc, appDesc, options) {
+        super(pkgDesc, appDesc, options)
+        this.attr = appDesc.attr || {};
+    }
+
+    onData( data ) {
+        super.onData(data);
+    }
+
+    onReady() {
+        this.trigger(_.clone(this.inputValue));
+        this.emit('data', this.inputValue);
+    }
+
+    onTrigger() {
+        super.onTrigger();
+    }
+
+    static attachTo(appDesc, attrs, div) {
+        return new Synchronizer(pkgDesc, appDesc, attrs);
+    }
+}
+
+module.exports = Synchronizer;

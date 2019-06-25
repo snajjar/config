@@ -1,0 +1,366 @@
+var DualBox = {};
+
+function getPos(el) {
+    var width = el.offsetWidth, height = el.offsetHeight;
+    for (var lx=0, ly=0; el != null; lx += el.offsetLeft, ly += el.offsetTop, el = el.offsetParent);
+    return {x: lx,y: ly, width: width, height: height};
+}
+
+function buildStyle( o ) {
+    var s = "";
+    var keys = Object.keys(o);
+    for(var i=0; i<keys.length; i++) {
+        s+= keys[i] + ":" + o[keys[i]] + "; "
+    }
+    return s;
+}
+
+// create a stylesheet and insert it
+var insertSheet = function() {
+    // Create the <style> tag
+    var style = document.createElement("style");
+
+    // Add a media (and/or media query) here if you'd like!
+    // style.setAttribute("media", "screen")
+    // style.setAttribute("media", "only screen and (max-width : 1024px)")
+
+    // WebKit hack :(
+    style.appendChild(document.createTextNode(""));
+
+    // Add the <style> element to the page
+    document.head.appendChild(style);
+
+    return style.sheet;
+};
+
+DualBox.loaderScript = true;
+DualBox.spinnerStr = "<i class='fa fa-spinner fa-spin'></i>&nbsp; ";
+DualBox.themes = {
+    "dark" : {
+        'insert' : function(endpoint) {
+            var sheet = insertSheet();
+            sheet.insertRule(".DualBox-load-container { background-color: rgba(0,0,0,85)!important; }", 0);
+            sheet.insertRule(".DualBox-load-label { color: white; }", 0);
+            sheet.insertRule(".DualBox-canvas-loader.loader.is-active { background-color: rgba(0,0,0,0.85)!important; color: white!important; }", 0);
+        }
+    },
+
+    "light" : {
+        'insert' : function(endpoint) {
+            var sheet = insertSheet();
+            sheet.insertRule(".DualBox-load-container { background-color: transparent!important; }", 0);
+            sheet.insertRule(".DualBox-load-label { color: #666!important; }", 0);
+            sheet.insertRule(".DualBox-canvas-loader.loader.is-active { background-color: transparent!important; color: #666!important; }", 0);
+            sheet.insertRule(".DualBox-canvas-loader.loader.is-active::after { border-color: #666; border-left-color: rgba(255,255,255,0.8)!important; }", 0);
+        }
+    },
+}
+
+var insertDarkTheme = function() {
+    var sheet = sheet();
+    sheet.insertRule(".DualBox-load-container: { background-color: rgba(0,0,0,0.85); }", 1);
+    sheet.insertRule(".DualBox-load-label: { color: white; }", 1);
+}
+
+DualBox.isWebGLRunning = function() {
+    var canvas = document.createElement('canvas');
+    var supports = 'probablySupportsContext' in canvas ? 'probablySupportsContext' :  'supportsContext';
+    if (supports in canvas) {
+        return canvas[supports]('webgl') || canvas[supports]('experimental-webgl');
+    }
+    return 'WebGLRenderingContext' in window;
+}
+
+DualBox.installLoader = function(div, msg, loadId) {
+    if( !div[0] ) {
+        console.warn('DualBox Loader: the given loader div does not exist, loader not instanciated');
+        return;
+    }
+
+    var width = $(div).width();
+    var height = $(div).height();
+
+    div.append(
+        $('<div/>', {
+            class: 'DualBox-load-container ' + loadId,
+            style: buildStyle({
+                'position': 'relative',
+                'width': width + "px",
+                'height': height + "px",
+                'vertical-align': 'middle',
+                'min-width': '300px',
+                'min-height': '200px',
+            })
+        }).append(
+            $('<div/>', {
+                class: 'DualBox-load-center-div ' + loadId,
+                style: buildStyle({
+                    'width' : '200px',
+                    'height': '100px',
+                    'margin': 'auto',
+                    'position': 'absolute',
+                    'top': '0px',
+                    'bottom': '0px',
+                    'left': '0px',
+                    'right': '0px',
+                    'margin': 'auto',
+                })
+            }).append(
+                $('<p/>', { class: 'DualBox-load-label ' + loadId, style: "color: white;" }).append(msg),
+                $('<progress/>', {
+                    class: 'DualBox-load-progress ' + loadId,
+                    min : 0,
+                    max : 100,
+                    value : 0,
+                    style: buildStyle({
+                        'width': '180px',
+                        'display': 'none'
+                    })
+                })
+            )
+        )
+    );
+}
+
+DualBox.setLoaderMessage = function(div, msg) {
+    $(div).find('.DualBox-load-label').html(msg);
+}
+
+DualBox.hideLoaderProgress = function(div) {
+    $(div).find('.DualBox-load-progress').hide();
+}
+
+DualBox.showLoaderProgress = function(div) {
+    $(div).find('.DualBox-load-progress').show();
+}
+
+DualBox.removeLoader  = function(div, loadId) {
+    $('.DualBox-load-container.' + loadId).remove();
+}
+
+DualBox.showError = function(div, msg) {
+    var position = $(div).offset();
+    var width = $(div).width(), height = $(div).height();
+
+    $('document').ready(function() {
+        $(div).append(
+            $('<div/>', {
+                class: 'DualBox-error-container',
+                style: buildStyle({
+                    'position': 'relative',
+                    'width': width + "px",
+                    'height': height + "px",
+                    'vertical-align': 'middle',
+                    'min-width': '300px',
+                    'min-height': '200px',
+                })
+            }).append(
+                $('<div/>', {
+                    class: 'DualBox-error-center-div',
+                    style: buildStyle({
+                        'width' : '100%',
+                        'height': '100px',
+                        'margin': 'auto',
+                        'padding': '50px',
+                        'position': 'absolute',
+                        'top': '0px',
+                        'bottom': '0px',
+                        'left': '0px',
+                        'right': '0px',
+                        'margin': 'auto',
+                        'text-align': 'center'
+                    })
+                }).append(
+                    $('<p/>', { class: 'DualBox-load-label' }).append(msg)
+                )
+            )
+        );
+    });
+}
+
+DualBox.loading = {};
+DualBox.loaded  = {};
+
+DualBox.load = function(attrs, cb) {
+    var appName = attrs.app;
+    if( appName === undefined ) {
+        throw "You must specify the application in DualBox.load() params";
+    }
+    var phaseName = attrs.phase;
+    if( !phaseName ) {
+        if( attrs.version ) {
+            var version = attrs.version;
+        }
+        else {
+            throw "You must specify the application phase in DualBox.load() params. Use 'production' for production version";
+        }
+    }
+
+    // get attributes
+    var loaderDiv = attrs.loaderDiv;
+    var loadingMsg = attrs.loadingMsg || "Loading DualBox app...";
+    var startingMsg = attrs.startingMsg || "Starting app...";
+    var endpoint = attrs.endpoint || "https://dualbox.com/";
+    var loaderCB  = cb;
+
+    // generate a random number for this load to uniquely indentify divs
+    var loadId = Math.floor(Math.random() * 1000000);
+
+    // data about this load (to be decorated when the response arrive)
+    DualBox.loading[loadId] = {
+        "app" : appName,
+        "phase" : phaseName,
+        "version" : version,
+        "loadId" : loadId,
+        "trackEP" : endpoint + "api/track/",
+    }
+
+    // insert theme (dark by default, or light)
+    var theme = attrs.theme || "light";
+    DualBox.themes[theme].insert(endpoint);
+
+    var url = phaseName ?
+        endpoint + "api/app/" + appName + "/p/" + phaseName:  // phase load
+        endpoint + "api/app/" + appName + "/v/" + version;  // version load
+
+    var onLoadError = function( jqXHR, textStatus, errorThrown )  {
+        if( loaderDiv ) DualBox.removeLoader(loaderDiv, loadId);
+        console.error("Error loading the application. Are you using the right application name and phase ? details: %s", errorThrown);
+        if( phaseName !== undefined ) {
+            DualBox.showError(loaderDiv, "Error loading the application.<br/>Please check that there is a deployed version" +
+                " for application " + appName + " on phase " + phaseName + ".");
+        }
+        else {
+            DualBox.showError(loaderDiv, "Error loading the application.<br/>Please check that there is a deployed version " + version +
+                " for application " + appName);
+        }
+    }
+
+    // resolve application data and location
+    var resolveApplication = function(cb) {
+        $.ajax({
+            method: 'GET',
+            url: url,
+            dataType: "json",
+            processData: false,
+            crossDomain: true,
+            cache: false,
+            success: function(data, textStatus, jqXHR) {
+                // call our cb
+                cb(data);
+            },
+            error: onLoadError
+        });
+    };
+
+    var scriptExists = function(url, app, version) {
+        // search for a script tag in this application and version
+        var script = $('.dualbox-script[data-app="' + app + '"][data-version="' + version + '"]');
+        return script[0] !== undefined;
+    }
+
+    var addScript = function(url, app, version) {
+        var onLoadSuccess = function() {
+            $(this).attr('data-loaded', true);
+
+            DualBox.instanceData = DualBox.loading[loadId];
+
+            // remove loader div
+            if( loaderDiv ) DualBox.removeLoader(loaderDiv, loadId);
+
+            // synchronously execute callback
+            // instanciating the start function and bind it to the current DualBox object
+            if( loaderCB ) {
+                loaderCB( DualBox.start ? DualBox.start.bind(DualBox) : ShapeX.start.bind(ShapeX) );
+                loaderCB = null;
+            }
+        }
+
+        // search for a script tag in this application and version
+        var script = $('.dualbox-script[data-app="' + app + '"][data-version="' + version + '"]');
+        if( script[0] ) {
+            //script.remove();
+            if( script.attr('data-loaded') === true ) {
+                onLoadSuccess.apply(script[0]);
+            }
+            else {
+                script[0].addEventListener('error', onLoadError, false);
+                script[0].addEventListener('load', onLoadSuccess, false);
+            }
+        }
+
+        // script does not exist yet
+        (function(callback) {
+            var s = document.createElement('script');
+            s.classList.add('dualbox-script');
+            s.setAttribute('src', url);
+            s.setAttribute('data-app', app);
+            s.setAttribute('data-version', version);
+            s.setAttribute('charset', 'utf8');
+            s.addEventListener('error', onLoadError, false);
+            s.addEventListener('load', callback, false);
+            document.body.appendChild( s );
+        })(onLoadSuccess);
+     }
+
+    // insert a script tag with the application, if it does not exist
+    var loadApplication = function(data) {
+        var scriptUrl = data['Location'];
+        var app     = DualBox.loading[loadId].app     = data['App'];
+        var version = DualBox.loading[loadId].version = data['Version'];
+        var phase   = DualBox.loading[loadId].phase   = data['Phase'];
+
+        addScript(scriptUrl, app, version);
+    }
+
+    // Allright, load our app
+    if( loaderDiv ) DualBox.installLoader(loaderDiv, DualBox.spinnerStr + loadingMsg, loadId);
+    resolveApplication(function(data) {
+        loadApplication(data);
+    });
+}
+
+// Load a saved DualBox object - resolve application, set inputs and all
+DualBox.loadObject = function(attrs, json, cb) {
+    if( attrs === undefined ) throw "You must provide the attributes";
+    if( attrs.div === undefined ) throw "You must provide a 'div' in the first parameter, either a div or false for a standalone app";
+    if( !json.app )     throw "the second parameter is missing the 'app' attribute - can not load application";
+    if( !json.version ) throw "the second parameter is missing the 'version' attribute - can not load application";
+
+    if( !attrs.options ) attrs.options = {};
+
+    // build the settings for the application loader
+    var loadParams = {
+        "app"         : json.app,
+        "version"     : json.version,
+        "endpoint"    : attrs.endpoint || "https://dualbox.com/",
+        "loadingMsg"  : attrs.loadingMsg || null,
+        "startingMsg" : attrs.startingMsg || null
+    };
+    if( attrs.div !== false ) {
+        loadParams.loaderDiv = attrs.div;
+    }
+
+    // build the settings for DualBox
+    var runParams = {
+        "logLevel" : attrs.logLevel || "warn",
+        "profiler" : attrs.profiler || false,
+        "ui"       : json.interfaces || {},
+        "input"    : json.input || {},
+        "div"      : attrs.div,
+
+        // language params (optional)
+        "lang"         : attrs.options.lang,
+        "translations" : attrs.options.translations,
+    }
+
+    DualBox.load(loadParams, function(start) {
+        var app = start(runParams);
+        app.ready(function() {
+            app.import(json);
+            cb(app);
+        });
+    });
+}
+
+ShapeX = DualBox; // backward-compatibility

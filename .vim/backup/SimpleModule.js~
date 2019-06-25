@@ -1,0 +1,414 @@
+"use strict";
+
+import { clearImmediate } from 'timers';
+
+const IONode = require('./IONode');
+const env = require('../Env');
+const errors = require('../Errors');
+const ResponseObject = require('./utils/ResponseObject');
+
+/**
+ *  Superclass for DualBox loop-free modules.
+ *
+ *  Note about eval strategy :
+ *      We use a push strategy : when a node computes its outputs, it pushes
+ *      them to the nex nodes.
+ *      Caching will occur in inputs of each node. This is easier because in
+ *      the case of an output will several links, the easiest way to handle
+ *      non cached outputs is pushing and cleaning the node.
+ *
+ */
+class SimpleModule extends IONode {
+    /**
+     *  @constructor
+     *  @param {Object} description The package decription of the module.
+     *  @param {string} id A unique id for the module in the graph-browserify.
+     */
+    constructor( desc, attrs ) {
+        attrs.tag = "Module(" + attrs.id + ")";
+        attrs.loggerOptions = { userOrigin: true, logLevel: env.getLogLevel() };
+        super(desc, attrs);
+
+        // no worker by default
+        this.parallel = false;
+
+        // Cache attributes
+        this.cache = false;
+        this.output = {}; // if cache is true, will contain the cached values.
+
+        // profiler
+        this.profiler = env.getProfiler();
+        this.startP = null;
+        this.endP = null;
+        this.performances = {
+            min: null,
+            max: null,
+            total: null,
+            avg: null,
+            nbRuns: 0,
+        }
+
+        // current execution handler (allow to remove compute when it's not already beeing processed)
+        this.currentExecutionHandler = null;
+
+        this.jobId = this.generateJobId();  // jobId set at the last interruption
+        this.execJobId = null; // jobId set at the last execution start
+
+        this.setAfterDataListener();
+    }
+
+    generateJobId() {
+        return Math.floor(Math.random() * 1000000);
+    }
+
+    setAfterDataListener() {
+        // clear input data once we sent the result, manage cache
+        this.on(this, 'data', (data)=> {
+            this.debug("[DATALISTENER:SELF] %s afterDataListener starting", this.id, { userOrigin: false });
+
+            if( !this.isReady() ) {
+                this.log("[INTERRUPT] after data callback interrupted: node is not ready anymore !", { userOrigin: false });
+                return;
+            }
+
+            // Emit all needed UI events
+            this.trigger( data );
+
+            if( !env.worker ) {
+                // if output is cached, save values
+                if( this.cache ) {
+                    this.info("[CACHE] %s saving result to cache", this.id, { userOrigin: false });
+                    this.output = data.output;
+                }
+
+                this.clear();
+            }
+        });
+    }
+
+    clone(clonedAttrs){
+        var node = (new this.constructor(clonedAttrs));
+        return node;
+    }
+
+    /**
+     *  Check the current input state. Error is thrown if at least one input is null.
+     */
+    runtimeCheckInput( error ){
+        var keys = Object.keys(this.inputValid);
+        for(var i=0; i<keys.length; ++i){
+            if(this.inputValid[keys[i]] === false) {
+                console.error("%s isInputReady ? " + this.isInputReady());
+                console.error("%s isCacheValid ? " + this.isCacheValid());
+                throw new errors.RuntimeError(this.id + ":"+keys[i]+" is not valid, module cannot be resolved");
+            }
+            if(this.inputValue[keys[i]] === undefined){
+                throw new errors.RuntimeError(this.id + ":"+keys[i]+" is not set to any value, module cannot be resolved");
+            }
+        }
+    }
+
+    /**
+     *  @param {Object} input
+     *  @param {ResponseObject} response object, will be used to send data.
+     */
+    compute( input, response ){
+        throw new errors.ImplementationError("compute is pure abstract, should be reimplemented in all DualBox modules");
+    }
+
+    /**
+     *  Overwrittend from IONode
+     */
+    invalidOutputs() {
+        // Add cache invalidation
+        if(this.cache){
+            this.output = {};
+        }
+        super.invalidOutputs();
+    }
+
+    /**
+     *  Set the cache value for this node output
+     *  @param {boolean} val The boolean value, true means the output will be cached and reused if possible.
+     */
+    setOutputCache(val){
+        this.cache = val;
+        if(!this.cache){
+            this.output = {};
+        }
+    }
+
+    isReady(){
+        return this.isCacheValid() || this.isInputReady();
+    }
+
+
+    /*
+     *   Setup parallel computation in a worker (true) or a sequential computation (false)
+     */
+    setParallel( parallel ) {
+        this.parallel = parallel;
+    }
+
+    /*
+     *   Setup parallel computation in a worker (true) or a sequential computation (false)
+     */
+    isParallel() {
+        return this.parallel;
+    }
+
+    /*
+     *   Compute output sequentially
+     */
+    computeSequential() {
+        if( this.getRootApp() ) {
+            this.getRootApp().trycatch(() => {
+                var response = new ResponseObject(this);
+                this.compute(this.inputValue, response);
+            });
+        }
+        else {
+            var response = new ResponseObject(this);
+            this.compute(this.inputValue, response);
+        }
+    }
+
+    /*
+     *   Interrupt current computation
+     */
+    interrupt( invalidKeys ) {
+        // if we sent our compute job already, clear it
+        if( this.currentExecutionHandler ) {
+            clearImmediate( this.currentExecutionHandler );
+            this.currentExecutionHandler = null;
+        }
+
+        this.jobId = this.generateJobId(); // set up a quick random id
+        this.log("[INTERRUPT] setting jobId to %s", this.jobId, { userOrigin: false });
+
+        if( this.isStatus(SimpleModule.status.COMPUTING) ) {
+            if( this.isParallel() ) {
+                this.warn("interrupting current computation !", { userOrigin: false });
+                const workerPool = require('./workers/WorkerPool');
+                workerPool.killTask(this);
+            }
+            else {
+                this.stop();
+            }
+        }
+
+        if( this.profiler ) this.clearProfile();
+        super.interrupt(invalidKeys);
+    }
+
+    interruptible( f ) {
+        var self = this;
+        this.debug("Launch interruptible callback", { userOrigin: false, event: true });
+
+        var jobId = this.jobId;
+
+        return function() {
+            // worker interruption is handle directly by the workerpool
+            // Here, we only need to test if our jobId is still the same
+            if( self.jobId !== jobId || !self.isReady() ) {
+                self.debug("[DISCARD] %s is not ready anymore, jobId changed", self.id, { userOrigin: false });
+                self.cancelEvaluation("Module is not ready anymore, cancelled launch of compute");
+                return;
+            }
+            else {
+                var args = arguments;
+                if( self.getRootApp() && !env.getRemoveTryCatch() ) {
+                    self.getRootApp().trycatch(function() { // catch errors
+                        f.apply(self, args); // run the function with the given args
+                    }, function onError(e) {
+                        console.error('Error executing module ' + self.id + ' of type ' + self.desc.name +
+                            ' on inputs ' + JSON.stringify(self.inputValue,null,2) + "  " + e);
+                        throw e;
+                    });
+                }
+                else {
+                    f.apply(self, args);
+                }
+            }
+        };
+    }
+
+    /*
+     *   Interrupt method (to be redefined by the module);
+     */
+    stop() {
+        //this.debug("module stop called. Should it be overriden?", { userOrigin: false });
+    }
+
+    /*
+     *   Compute output in another thread/worker - Not working yet
+     */
+    computeParallel() {
+        // set output and return when receiving response
+        this.log("send worker compute request", { userOrigin: false });
+
+        // add task to the worker pool
+        const workerPool = require('./workers/WorkerPool');
+        workerPool.launchTask(this);
+    }
+
+
+    /**
+     *  Compute the output of the module and emit data event when done (async)
+     *  Note : computing the output may invalidate the input. For exemple,
+     *         a translated mesh will be transformed.
+     *         By convention, invalid inputs are reset to null.
+     */
+    startCompute(){
+        this.log("Computing %s", this.id, { userOrigin: false });
+        if( this.profiler ) {
+            // start the profiler timer
+            this.startProfile();
+        }
+
+        this.runtimeCheckInput();
+        this.setStatus(IONode.status.COMPUTING);
+
+        this.isParallel() ? this.computeParallel() : this.computeSequential();
+    }
+
+    cancelEvaluation(reason) {
+        if( this.profiler ) {
+            this.clearProfile();
+        }
+        super.cancelEvaluation(reason);
+    }
+
+    emit(eventName, eventData) {
+        if( eventName == "data" ) {
+            // check if our executionHandler is set.
+            // If not, it means that we have been interrupted.
+            if( this.jobId !== this.execJobId ) {
+                this.info("[EVENT DISCARD] module %s has been interrupted, cancel sending data (jobId: %s, execJobId: %s)",
+                    this.id,this.jobId,this.execJobId, { userOrigin: false, event: true });
+                this.cancelEvaluation("Module's jobId changed since execution started");
+                return;
+            }
+
+            // check if the node is not ready anymore
+            if( !this.isReady() ) {
+                this.info("[EVENT DISCARD] %s is not ready anymore, cancel sending data",
+                    this.id, { userOrigin: false, event: true });
+                this.cancelEvaluation("Module's not ready anymore after compute finished");
+                return;
+            }
+        }
+
+        super.emit(eventName, eventData);
+    }
+
+    isCacheValid() {
+        return this.cache && Object.keys(this.output).length !== 0;
+    }
+
+    onReady() {
+        super.onReady(); // set ready state
+
+        if( this.isCacheValid() ) {
+            this.info("[CACHE] %s fetching response from cache", this.id, { userOrigin: false });
+            this.emit('data', this.output);
+        }
+        else {
+            this.currentExecutionHandler = this.asynchrone(() => {
+                // set up the execution job id
+                this.execJobId = this.jobId;
+                this.log("COMPUTE: setting execJobId to %s", this.jobId, { userOrigin: false });
+
+                // compute the data
+                this.startCompute();
+            });
+        }
+    }
+
+
+    /**************************************************************************
+     * Profiling
+     *************************************************************************/
+
+    now() {
+        try {
+            if( env.browser && window && window.performance && window.performance.now ) {
+                return window.performance.now();
+            }
+            else {
+                return (new Date()).getTime();
+            }
+        }
+        catch(e) {
+            return (new Date()).getTime();
+        }
+    }
+
+    setProfiler( b ) {
+        this.profiler = b;
+        if( this.looperNode ) this.looperNode.setProfiler(b);
+    }
+
+    startProfile() {
+        // if parallel module, we'll get the computing times from worker
+        if( !this.parallel ) {
+            this.startP = this.now();
+        }
+    }
+
+    endProfile() {
+        // if parallel module, we'll get the computing times from worker
+        if( !this.parallel ) {
+            if( this.startP ) {
+                this.endP = this.now();
+                this.addRunPerformance( this.endP - this.startP );
+            }
+            this.clearProfile();
+        }
+    }
+
+    emit(eventName, eventData){
+        if( eventName == "data" ) {
+            if( this.profiler && this.startP ) {
+                this.endProfile();
+            }
+        }
+
+        super.emit(eventName, eventData);
+    }
+
+    clearProfile() {
+        this.startP = null;
+        this.endP = null;
+    }
+
+    clearPerformances() {
+    }
+
+    addRunPerformance( time ) {
+        this.performances.min = this.performances.min ? Math.min(this.performances.min, time) : time;
+        this.performances.max = this.performances.max ? Math.max(this.performances.max, time) : time;
+        this.performances.avg = (this.performances.avg * this.performances.nbRuns + time) / (this.performances.nbRuns + 1);
+        this.performances.total = this.performances.total + time;
+        this.performances.nbRuns += 1;
+    }
+
+    getPerformances() {
+        return this.performances;
+    }
+
+
+    /**************************************************************************
+     * Debug
+     *************************************************************************/
+
+    // write on error logs the module current state for debug purposes
+    dump() {
+        var inspect = require('util').inspect;
+        super.dump();
+
+        console.log("cache: " + inspect(this.cache));
+    }
+}
+
+module.exports = SimpleModule;

@@ -1,0 +1,36 @@
+const errors = require('../../Errors');
+
+/**
+ *   Response object class to be transmitted to user module
+ *   It allows to respond whenever it's necessary, without having
+ *   to manage a callback hell in DualBox modules.
+ */
+class ResponseObject {
+    constructor(node) {
+        this.node = node;
+        this.jobId = node.jobId;
+        this.sent = false; // can only send result once
+    }
+
+    // should be called only once
+    send( data ) {
+        // check if we didn't respond already
+        if( this.sent ) {
+            throw new errors.RuntimeError("Module " + this.node.id +
+                " has already responded. A module can respond only once");
+        }
+        this.sent = true;
+
+        // check against the node's current jobId if we should respond
+        if( this.jobId == this.node.jobId ) {
+            this.node.emit('data', data);
+            this.node.clear();
+        }
+        else {
+            this.node.log("Reponse for job %s discarded, jobId has changed", this.jobId, { userOrigin: false });
+            this.node.cancelEvaluation("Module's JobID changed after receiving the asynchronous response");
+        }
+    }
+}
+
+module.exports = ResponseObject;

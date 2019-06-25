@@ -1,0 +1,432 @@
+<style>
+.card-settings .card-body {
+    font-size: 12px;
+    padding-left: 5px;
+    padding-right: 5px;
+}
+
+.fa {
+    pointer-events: none;
+}
+
+.table-desc {
+    width: 100%;
+}
+
+.table-desc thead td {
+    margin-right: 6px;
+}
+
+.table-desc tbody td {
+    margin-right: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    height: 40px;
+}
+
+.application-description {
+    margin-top: 20px;
+    text-align: left;
+    font-size: 12px;
+}
+
+.card-header[data-toggle="collapse"] {
+    cursor: pointer;
+}
+
+.card-header[data-toggle="collapse"] h5 {
+    user-select: none;
+}
+
+.card-header[data-toggle="collapse"]:hover .btn-link {
+    text-decoration: none;
+}
+
+.text-value, .number-value, .boolean-value {
+    max-width: 140px;
+}
+
+.event-if, .event-data {
+    max-width: 80px;
+}
+
+.select-event-target, .select-event-name, .event-if, .event-data {
+    font-size: 12px;
+}
+
+.edit-body {
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100% - 80px);
+}
+
+/* remove bs4 transition on collapsing */
+.edit-main-panel .collapsing {
+    -webkit-transition: none!important;
+    transition: none!important;
+    display: none!important;
+}
+</style>
+
+<template>
+
+<div class="edit-main-panel h100" id="edit-main-panel">
+    <div style="padding-left: 10px; padding-top: 10px; padding-right: 10px;">
+        <h2 class="edit-dualbox-app">
+            <div class="dualbox-node-name">
+                <span class="text-truncate d-inline-block" style="width: 290px">Application</span>
+            </div>
+        </h2>
+    </div>
+
+    <div class="edit-body">
+        <div class="card">
+            <div class="card-header" id="dualbox-main-desc" data-toggle="collapse" data-target="#dualbox-main-desc-collapse" aria-expanded="false" aria-controls="dualbox-main-desc-collapse">
+                <h5 class="mb-0 btn-link">Description</h5>
+            </div>
+
+            <div id="dualbox-main-desc-collapse" class="collapse show" aria-labelledby="dualbox-main-desc" data-parent="#edit-main-panel">
+                <div class="card-body">
+                    <p class="application-description">{{ app.getDescription() || "[No description available]" }} <button class="btn btn-editor-xs btn-light btn-edit-app-description" @click="editAppDescription"><i class="fa fa-edit"></i></button></p>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header" id="dualbox-main-events" data-toggle="collapse" data-target="#dualbox-main-events-collapse" aria-expanded="false" aria-controls="dualbox-main-events-collapse">
+                <h5 class="mb-0 btn-link">Events</h5>
+            </div>
+
+            <div id="dualbox-main-events-collapse" class="collapse" aria-labelledby="dualbox-main-events" data-parent="#edit-main-panel">
+                <div class="card-body" style="padding-left: 4px; padding-right: 4px;">
+                    <button class="btn btn-success btn-add-app-event mb-3" @click="addAppEvent">Add application event</button>
+                    <div v-for="key in app.getEventsNames()" class="card" :key="'app-event-' + key">
+                        <div class="card-header" :id="'dualbox-event-' + key" data-toggle="collapse" :data-target="'#dualbox-event-' + key + '-collapse'" aria-expanded="false" aria-controls="'dualbox-event-' + key + '-collapse'">
+                            <h5 class="mb-0 btn-link" style="font-size: 16px; font-weight: normal;">
+                                {{key}}
+                                <div class="float-right d-inline-block">
+                                    <button class="btn btn-light btn-editor-xs btn-rename-app-event" :data-event="key" @click="renameAppEvent">
+                                        <i class="fa fa-edit"></i>
+                                    </button>
+                                    <button class="btn btn-danger btn-editor-xs btn-remove-app-event" :data-event="key" @click="removeAppEvent">
+                                        <i class="fa fa-minus"></i>
+                                    </button>
+                                </div>
+                            </h5>
+                        </div>
+
+                        <div :id="'dualbox-event-'+ key + '-collapse'" class="collapse" :aria-labelledby="'dualbox-event-' + key" data-parent="#dualbox-main-events">
+                            <div class="card-body" style="padding-left: 4px; padding-right: 4px;">
+                                <h5 style="font-size: 16px; text-decoration: underline; font-weight: normal;">Description</h5>
+                                <p>{{ app.getEventDescription(key) || "[no description available]" }} <button class="btn btn-editor-xs btn-light btn-edit-event-description" :data-event="key" @click="editEventDescription"><i class="fa fa-edit"></i></button></p>
+                                <h5 class="mt-3" style="font-size: 16px; text-decoration: underline; font-weight: normal;">Triggers</h5>
+
+                                <table class="table-desc table-striped" style="font-size: 12px!important;">
+                                    <thead class="thead-dark">
+                                        <th>Target</th>
+                                        <th>Event</th>
+                                        <th>If</th>
+                                        <th>Data</th>
+                                        <th>Action</th>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(evt,index) in app.getEventIn(key)" :data-index="index" :key="'app-event-in-' + index">
+                                            <td>
+                                                <select v-if="evt.node !== undefined" class="form-control form-control-sm select-event-target" dualbox-target="events-in" :data-event="key" :data-index="index" @change="selectEventTarget">
+                                                    <option v-for="node in getNodesWithEvents()" :value="node.getGraphId()" :selected="node.getGraphId()==evt.node" :key="'event-in-target-' + node.getGraphId()">{{node.getGraphId()}}</option>
+                                                </select>
+                                                <span v-else>{{evt.selector}}</span>
+                                            </td>
+                                            <td>
+                                                <select class="form-control form-control-sm select-event-name" dualbox-target="events-in" :data-event="key" :data-index="index" @change="selectEventName" >
+                                                    <template v-if="evt.node">
+                                                        <option v-for="te in getNodeEvents(evt.node)" :value="te" :selected="te == evt.event" :key="'app-event-in-target-' + evt.node + '-' + te">{{te}}</option>
+                                                    </template>
+                                                    <template v-else>
+                                                        <option value="hide">hide</option>
+                                                        <option value="show">show</option>
+                                                    </template>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input class="form-control form-control-sm event-if" type="text" dualbox-target="events-in" :data-event="key" :data-index="index" :value="evt.if" @change="setEventIf" />
+                                            </td>
+                                            <td>
+                                                <input class="form-control form-control-sm event-data" type="text" dualbox-target="events-in" :data-event="key" :data-index="index" :value="evt.data" @change="setEventData" />
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-danger btn-editor-xs btn-remove-in-event" :data-event="key" :data-index="index" @click="removeInEvent" >
+                                                    <i class="fa fa-minus"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td colspan="5" style="padding-top: 0px; padding-bottom: 0px;">
+                                                <button class="btn btn-sm btn-add-subevent" :data-event="key" style="width: 100%;" @click="addSubEvent">Add a subevent</button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                <h5 class="mt-3" style="font-size: 16px; text-decoration: underline; font-weight: normal;">Callback</h5>
+
+                                <table class="table-desc table-striped" style="font-size: 12px!important;">
+                                    <thead class="thead-dark">
+                                        <th>Target</th>
+                                        <th>Event</th>
+                                        <th>Action</th>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-if="app.getEventOut(key) !== undefined">
+                                            <td>
+                                                <select v-if="app.getEventOut(key).node !== undefined" class="form-control form-control-sm select-event-target" dualbox-target="events-out" >
+                                                    <option v-for="node in getNodesWithEvents()" :value="node.getGraphId()" :selected="node.getGraphId()===app.getEventOut(key).node" :key="'app-event-out-target-' + node.getGraphId()">{{ node.getGraphId() }}</option>
+                                                </select>
+                                                <span v-else>{{app.getEventOut(key).selector}}</span>
+                                            </td>
+                                            <td>
+                                                <select class="form-control form-control-sm select-event-name" dualbox-target="events-out">
+                                                    <template v-if="app.getEventOut(key).node">
+                                                        <option v-for="(te, index) in getNodeEvents(app.getEventOut(key).node)" :value="te" :selected="te == app.getEventOut(key).event" :key="'app-event-out-' + index">{{te}}</option>
+                                                    </template>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-danger btn-editor-xs btn-remove-out-event" :data-event="key" @click="removeOutEvent">
+                                                    <i class="fa fa-minus"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        <tr v-else>
+                                            <td colspan="3" style="padding-top: 0px; padding-bottom: 0px;">
+                                                <button class="btn btn-sm btn-add-callback" data-event="@key" style="width: 100%;" @click="addCallback">Add a callback</button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal edit-value-modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit value</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div>
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value unset-value" id="unset-value" name="set-value" value="unset-value" checked>
+                            <label class="form-check-label" for="unset-value">
+                                don't set a value
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value set-value-null" id="set-value-null" name="set-value" value="set-value-null">
+                            <label class="form-check-label" for="set-value-null">
+                                set null
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" class="form-check-input set-value set-value-type" id="set-value-type" name="set-value" value="set-value-type" aria-label="Set a value of type">
+                            <div class="form-inline form-check-label" style="height: 24px;">
+                                <label for="set-value-type">
+                                    set a value of type:
+                                    <select class="form-control choose-value-type d-inline-block form-control-sm ml-2">
+                                        <option value="string">String</option>
+                                        <option value="number">Number</option>
+                                        <option value="boolean">Boolean</option>
+                                        <option value="object">Object</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="has-value" style="display: none;">
+                        <hr/>
+                        <div class="define-value define-boolean" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <select class="form-control form-control-sm bool-value d-inline-block ml-2">
+                                    <option value=true>True</option>
+                                    <option value=false>False</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="define-value define-number" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <input type="number" class="form-control form-control-sm number-value ml-2"/>
+                            </div>
+                        </div>
+                        <div class="define-value define-string" style="display: none;">
+                            <div class="form-inline">
+                                <label>Value: </label>
+                                <input type="text" class="form-control form-control-sm text-value ml-2"/>
+                            </div>
+                        </div>
+                        <div class="define-value define-object" style="display: none;">
+                            <label>Value: </label>
+                            <div class="json-editor" style="height: 400px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary btn-save">Save changes</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</template>
+
+<script>
+import _ from 'lodash';
+import swal from 'sweetalert2';
+
+export default {
+    props: [
+        "app"
+    ],
+    data: function () {
+        return {
+        };
+    },
+    created: function() {
+        this.view = window.dualboxEditor.v;
+    },
+    mounted: function() {
+        // bind tooltips
+        $(this.$el).find('button[data-toggle="tooltip"]').tooltip();
+    },
+    methods: {
+        getNodesWithEvents: function() {
+            var l = [];
+            var nodes = this.view.m.getNodes("ui");
+            _.each(nodes, (n) => {
+                if( n.getEventsNames().length > 0 ) {
+                    l.push(n);
+                }
+            });
+            return l;
+        },
+
+        getNodeEvents: function( nodeId ) {
+            var node = this.view.m.getNode(nodeId);
+            return node.getEventsNames();
+        },
+
+        editAppDescription: function() {
+            swal({
+                input: 'text',
+                title: 'Enter the description',
+            }).then((result) => {
+                this.view.c.setAppDescription(result.value);
+            });
+        },
+
+        editEventDescription: function(e) {
+            var eventName = $(e.target).attr('data-event');
+
+            swal({
+                input: 'text',
+                title: 'Enter the description',
+            }).then((result) => {
+                this.view.c.setAppEventDescription(eventName, result.value);
+            });
+        },
+
+        removeAppEvent: function(e) {
+            var name = $(e.target).attr('data-event');
+            this.view.c.removeAppEvent(name);
+        },
+
+        renameAppEvent: function(e) {
+            var name = $(e.target).attr('data-event');
+            swal({
+                input: 'text',
+                title: 'Enter the new event name',
+            }).then((result) => {
+                if( result.value ) {
+                    this.view.c.renameAppEvent(name, result.value);
+                }
+            });
+        },
+
+        setEventIf: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventIf( "#application-" + $(e.target).attr('dualbox-target') + '-' + $(e.target).attr('data-event'), index, val);
+        },
+
+        setEventData: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventData( "#application-" + $(e.target).attr('dualbox-target') + '-' + $(e.target).attr('data-event'), index, val);
+        },
+
+        selectEventTarget: function(e) {
+            var target = $(e.target).val();
+
+            // change options of closest .select-event-name according to this new target
+            var targetNode = this.view.m.getNode(target);
+            var targetEvents = targetNode.getEventsNames();
+            var select = $(e.target).closest('tr').find('.select-event-name');
+            select.html('');
+            _.each(targetEvents, (eventName) => {
+                select.append( $('<option/>', {
+                    value: eventName
+                }).append(eventName));
+            });
+
+            var index = parseInt($(e.target).attr('data-index'));
+            this.view.c.setEventTarget( "#application-" + $(e.target).attr('dualbox-target') + '-' + $(e.target).attr('data-event'), index, target);
+        },
+
+        selectEventName: function(e) {
+            var index = parseInt($(e.target).attr('data-index'));
+            var val = $(e.target).val();
+            this.view.c.setEventName( "#application-" + $(e.target).attr('dualbox-target') + '-' + $(e.target).attr('data-event'), index, val );
+        },
+
+        addAppEvent: function(e) {
+            swal({
+                input: 'text',
+                title: 'Enter the event name',
+            }).then((result) => {
+                this.view.c.addAppEvent(result.value);
+            });
+        },
+
+        removeInEvent: function(e) {
+            var eventName = $(e.target).attr('data-event');
+            var index = parseInt($(e.target).attr('data-index'));
+            this.view.c.removeAppInEvent(eventName, index);
+        },
+
+        removeOutEvent: function(e) {
+            var eventName = $(e.target).attr('data-event');
+            this.view.c.removeAppOutEvent(eventName);
+        },
+
+        addSubEvent: function(e) {
+            var eventName = $(e.target).attr('data-event');
+            this.view.c.addSubEvent(eventName);
+        },
+
+        addCallback: function(e) {
+            var eventName = $(e.target).attr('data-event');
+            this.view.c.addCallback(eventName);
+        }
+    }
+}
+</script>

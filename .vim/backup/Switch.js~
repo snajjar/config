@@ -1,0 +1,165 @@
+"use strict";
+
+const LoopModule = require('../LoopModule');
+const errors = require('../../Errors');
+const desc = require('./Switch.json');
+const _ = require('lodash');
+
+/**
+ *  Module If is here to choose between two options from a condition
+ *  by evaluating only the path from one of them (for performances)
+ */
+class Switch extends LoopModule {
+    constructor(attrs) {
+        super(desc, attrs);
+    }
+
+    getCondMatchingInputName() {
+        if( !this.hasCond() ) throw new errors.RuntimeError("Switch: getting cond matching input but we have no cond yet");
+
+        for(var i=1; i<=8; i++) {
+            if( this.inputValue["cond"] === this.inputValue["case" + i] ) {
+                return "ifCase" + i;
+            }
+        }
+        return "default";
+    }
+
+    getMissingConditions() {
+        var conds = [];
+
+        if( !this.inputValid["cond"] ) {
+            conds.push("cond");
+        }
+
+        for(var i=1; i<=8; i++) {
+            var condName = "case" + i;
+            if( !this.inputValid[condName] ) {
+                conds.push(condName)
+            }
+        }
+
+        return conds;
+    }
+
+    compute(input, response) {
+        for(var i=1; i<=8; i++) {
+            if( input.cond === input["case" + i] ) {
+                response.send({ "result" : input["ifCase" + i] });
+                return;
+            }
+        }
+        response.send({ "result" : input.default });
+    }
+
+    // On this node, there is 2 steps in fetching datas
+    // Step 1: fetching the condition (cond)
+    // Step 2: fetching ifTrue or ifFalse according to cond
+    fetchMissingDataAndCompute() {
+        this.validAndCloneDefaultInputs();
+
+        if( this.isReady() ) {
+            // if node is not already evaluating, trigger the 'ready' event to start
+            // the evaluating process
+            if( !this.isEvaluating() ) {
+                this.setStatus(Switch.status.AWAITING_DATA);
+                this.emit('ready');
+            }
+        }
+        else {
+            if( this.hasCond() ) {
+                var cond = this.inputValue['cond'];
+                this.setStatus(Switch.status.AWAITING_DATA);
+                this.emit('read', { 'node': this, 'missing' : [this.getCondMatchingInputName()] });
+            }
+            else {
+                // fetch the conditions
+                this.setStatus(Switch.status.AWAITING_DATA);
+                this.emit('read', { 'node': this, 'missing' : this.getMissingConditions() });
+            }
+        }
+    }
+
+    onData( data ) {
+        if( data.node === undefined ) {
+            throw new errors.RuntimeError("node " + this.id + " received data with node undefined");
+        }
+        if( data.output === undefined ) {
+            throw new errors.RuntimeError("node " + this.id + " received data with output undefined");
+        }
+
+        // remove node listener
+        this.removeListener(data.node, "data");
+
+        // log incoming event
+        this.log("[EVENT] %s (state %s) RECEIVED data from %s", this.id, this.getStatusName(), data.node.id, { userOrigin: false, event: true });
+
+        // process data to this.inputValue and this.inputValid
+        if( this.isStatus(Switch.status.AWAITING_DATA) ) {
+            var newValidKeys = this.validateNewKeys(data);
+
+            if(this.isReady()){
+                this.emit('ready');
+            }
+            else {
+                if( newValidKeys.indexOf('cond') !== -1 ) {
+                    // we got the first step: the condition. Now get the condition input
+                    this.fetchMissingDataAndCompute();
+                }
+                else {
+                    this.debug('%s still needs (%s) to compute', this.id, JSON.stringify(this.getInvalidInputs()), { userOrigin: false });
+                }
+            }
+        }
+        else {
+            // discard callback, no value needed (ie none wants this node output)
+            this.info("[EVENT DISCARD] discarding data event, no one is listening to this node output", { userOrigin: false });
+        }
+    }
+
+
+    /**
+     *  The "if" node is ready only when the condition input is ready,
+     *  and when the right input (according to condition) is ready
+     */
+    isReady() {
+        return this.hasCond() && this.hasCondInput();
+    }
+
+    // true if we fetched the condition already
+    hasCond() {
+        return this.inputValid['cond'] &&
+            this.inputValid['case1'] &&
+            this.inputValid['case2'] &&
+            this.inputValid['case3'] &&
+            this.inputValid['case4'] &&
+            this.inputValid['case5'] &&
+            this.inputValid['case6'] &&
+            this.inputValid['case7'] &&
+            this.inputValid['case8'];
+    }
+
+    // true if we fetched the condition and the input for the condition already
+    // assume we already fetched the condition input
+    hasCondInput() {
+        var matchingInputName = this.getCondMatchingInputName();
+        return matchingInputName ? this.inputValid[matchingInputName] : false;
+    }
+
+    /**
+     *  Check the current input state.
+     */
+    runtimeCheckInput( error ){
+        if( !this.hasCond() ) {
+            throw new errors.RuntimeError(this.id + ": If condition was not resolved");
+        }
+        if(this.inputValue["cond"] === undefined){
+            throw new errors.RuntimeError(this.id + ": input cond is not set to any value, module cannot be resolved");
+        }
+        if( !this.hasCondInput() ) {
+            throw new errors.RuntimeError(this.id + ": If condition was resolved to " + this.inputValue['cond'] + " but the associated input wasnt resolved");
+        }
+    }
+}
+
+module.exports = Switch

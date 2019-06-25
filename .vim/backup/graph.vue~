@@ -1,0 +1,824 @@
+<style>
+    .dualbox-graph-container {
+        padding: 0px 0px 30px 0px;
+        margin-left: -25px;
+        margin-right: -25px;
+        height: 100%;
+        width: calc(100% + 50px);
+        overflow: hidden;
+        transform: translateZ(0); /* chrome hack to avoid glitches */
+    }
+
+    .dualbox-graph-container.translating {
+        cursor: move;
+    }
+
+    .dualbox-graph-container span {
+        pointer-events: none;
+    }
+
+    .dualbox-graph-canvas {
+        height: 100%;
+        width: 100%;
+        background-color: #eee;
+        position: relative;
+        outline-color: transparent!important;
+        min-height: 100%;
+        min-width: 100%;
+        border-radius: 5px;
+        background-color: #ECF2F8;
+        border: 1px solid #2e6da4;
+        display: inline-block; /* fix padding pb: https://stackoverflow.com/questions/10054870/when-a-child-element-overflows-horizontally-why-is-the-right-padding-of-the-par */
+        margin-bottom: -7px;
+    }
+
+    /* ex-plumb.css */
+    .dualbox-graph-canvas .marker-color-tag {
+        height: 8px;
+        margin: 0 3px 3px 0;
+        padding: 0;
+        width: 42px;
+        line-height: 75pt;
+        border-radius: 3px;
+        display: block;
+        width: 100%;
+    }
+
+    .dualbox-graph-canvas .jsplumb-connector {
+        z-index: 4;
+    }
+
+    .dualbox-graph-canvas .jsplumb-endpoint {
+        z-index: 30;
+    }
+    .dualbox-graph-canvas .inoutEndpointLabel, .endpointSourceLabel {
+        box-shadow: 1px 1px 1px #716f6f;
+        -o-box-shadow: 1px 1px 1px #716f6f;
+        -webkit-box-shadow: 0px 1px 1px #716f6f;
+        -moz-box-shadow: 1px 1px 1px #716f6f;
+        z-index: 2000;
+        transform:translate(0%,0%) !important; /* this shit is just to prevent jsplumb of centering the box on the endpoint... */
+    }
+    .dualbox-graph-canvas .descSpan {
+        box-shadow: 1px 1px 1px #716f6f;
+        -o-box-shadow: 1px 1px 1px #716f6f;
+        -webkit-box-shadow: 0px 1px 1px #716f6f;
+        -moz-box-shadow: 1px 1px 1px #716f6f;
+        position: fixed;
+        display:none;
+        z-index:2010;
+    }
+
+    .dualbox-graph-canvas .aLabel {
+        background-color: white;
+        padding: 0.4em;
+        font: 12px sans-serif;
+        color: #444;
+        z-index: 21;
+        border: 1px dotted gray;
+        opacity: 0.8;
+        cursor: pointer;
+    }
+
+    .dualbox-graph-canvas .aLabel.jsplumb-hover {
+        background-color: #5C96BC;
+        color: white;
+        border: 1px solid white;
+    }
+</style>
+
+<template>
+    <div class="grid-bg dualbox-graph-container dark" tabindex=1>
+        <div id="dualbox-graph-canvas" class="canvas-wide jtk-surface jtk-surface-nopan dualbox-graph-canvas">
+            <graph-node v-for="(def, id) in app.input" :key="getNodeUniqId(id, 'input')" :id="getNodeId(id, 'input')" :pkg="getNode(id, 'input').getPackage()" :def="def" :n="getNode(id, 'input')"></graph-node>
+            <graph-node v-for="(def, id) in app.output" :key="getNodeUniqId(id, 'output')" :id="getNodeId(id, 'output')" :pkg="getNode(id, 'output').getPackage()" :def="def" :n="getNode(id, 'output')"></graph-node>
+            <graph-node v-for="(def, id) in app.modules" :key="getNodeUniqId(id, 'module')" :id="getNodeId(id, 'module')" :pkg="getNode(id, 'module').getPackage()" :def="def" :n="getNode(id, 'module')"></graph-node>
+            <graph-node v-for="(def, id) in app.ui" :key="getNodeUniqId(id, 'ui')" :id="getNodeId(id, 'ui')" :pkg="getNode(id, 'ui').getPackage()" :def="def" :n="getNode(id, 'ui')"></graph-node>
+        </div>
+        <button class="btn btn-editor-xs btn-outline-dark btn-graph-goto btn-goto-topleft" style="position: absolute; top: 0; left: 0px; border-radius: 0px; border-top-left-radius: 5px; margin: 0;" v-on:click="gotoTopLeft"><i class="fa fa-arrows-alt"></i></button>
+        <button class="btn btn-editor-xs btn-outline-dark btn-graph-goto btn-goto-topright" style="position: absolute; top: 0; right: 0px; border-radius: 0px; border-top-right-radius: 5px; margin: 0;" v-on:click="gotoTopRight"><i class="fa fa-arrows-alt"></i></button>
+        <button class="btn btn-editor-xs btn-outline-dark btn-graph-goto btn-goto-bottomleft" style="position: absolute; bottom: 30px; left: 0px; border-radius: 0px; border-bottom-left-radius: 5px; margin: 0;" v-on:click="gotoBottomLeft"><i class="fa fa-arrows-alt"></i></button>
+        <button class="btn btn-editor-xs btn-outline-dark btn-graph-goto btn-goto-bottomright" style="position: absolute; bottom: 30px; right: 0px; border-radius: 0px; border-bottom-right-radius: 5px; margin: 0;" v-on:click="gotoBottomRight"><i class="fa fa-arrows-alt"></i></button>
+    </div>
+</template>
+
+<script>
+// Utils
+import _ from 'lodash';
+import dbutils from '../../m/DualboxUtils';
+import Utils from '../Utils';
+import swal from 'sweetalert2';
+
+// Sub-components
+import graphNodeVue from './graphNode.vue';
+
+// Canvas control helpers
+import Zoomer from '../Zoomer';
+import Selector from '../Selector';
+import Translater from '../Translater';
+import CanvasSizeHandler from '../CanvasSizeHandler';
+import ContextMenu from '../ContextMenu';
+
+// jsplumb style definitins
+import PlumbStyle from '../PlumbStyle';
+
+export default {
+    props: [
+        "app"     // the app model
+    ],
+    components: {
+        'graph-node' : graphNodeVue,
+    },
+    data: function () {
+        return {
+            utils: Utils,
+            loading: false,
+        }
+    },
+    created: function() {
+        this.view = window.dualboxEditor.v;
+        this.jsPlumbInstance = null;
+
+        // Controls helpers utilities
+        this.selector = null;
+        this.translater = null;
+        this.zoomer = null;
+        this.canvasSizeHandler = null;
+
+        // encapsulate the JSPlumb styles
+        this.style = new PlumbStyle(this);
+
+        this.addLink = (sourceId, sourceOutput, targetId, targetInput) => {
+            var sourceUuid = [sourceId, "output", sourceOutput].join('#');
+            var targetUuid = [targetId, "input", targetInput].join('#');
+
+            // hide source and target types
+            this.style.hideType(sourceUuid); // works with endpoint or uuid
+            this.style.hideType(targetUuid);
+
+            var connection = this.jsPlumbInstance.connect({
+                uuids: [sourceUuid, targetUuid],
+                editable: true,
+                paintStyle: this.style.connectorData.paintStyle,
+                cssClass: 'data-connection',
+                connectorClass: 'data-connection'
+            });
+
+            // split the connection if we need to
+            var datalink = this.view.m.getDataLink(sourceId, sourceOutput, targetId, targetInput);
+            var path = datalink.getPath();
+            _.each( path, (pos) => {
+                var r = this.splitConnection(connection, pos);
+                connection = r.c2; // switch to the 2nd child connection
+            });
+        }
+
+        this.addEvent = (sourceId, targetId, name) => {
+            var sourceUuid = [sourceId, "event-out"].join('#');
+            var sourceEP = this.jsPlumbInstance.getEndpoint(sourceUuid);
+
+            var connection = this.jsPlumbInstance.connect({
+                source: sourceEP,
+                target: targetId,
+                editable: true,
+                paintStyle: this.style.connectorData.paintStyle,
+                cssClass: 'event-connection',
+                connectorClass: 'event-connection',
+                overlays: [
+                    [ "PlainArrow", { location: 1,  width:10, length:10, gap: 12 }],
+                    [ "Label", { label: name, location:0.50, labelStyle: { cssClass: "connection-label noselect" } } ]
+                ]
+            });
+            connection.setParameter("event", name);
+
+            // split the connection if we need to
+            var eventlink = this.view.m.getEventLink(sourceId, targetId, name);
+            var path = eventlink.getPath();
+            _.each( path, (pos) => {
+                var r = this.splitConnection(connection, pos);
+                connection = r.c2; // switch to the 2nd child connection
+            });
+        }
+
+        // split a connection by adding an endpoint at given pos
+        this.splitConnection = ( connection, pos ) => {
+            var c = connection.getParameters();
+
+            // create the endpoint div
+            var id = "connection-split-" + dbUtils.randomString(8);
+            var div = $('<div/>', {
+                id: id,
+                class: "connection-control capture-left-click capture-right-click"
+            });
+            $(this.view.canvas).append(div);
+
+            // position it at pos (adjust for the height of the div)
+            var jsPlumbElement = this.jsPlumbInstance.getElement(id);
+            this.jsPlumbInstance.setPosition(jsPlumbElement, pos);
+
+            // make this div draggable
+            var startPosition = pos;
+            this.jsPlumbInstance.draggable(div, {
+                start: (e) => {
+                    startPosition = this.jsPlumbInstance.getPosition(jsPlumbElement);
+                },
+                stop: (e) => {
+                    var stopPosition = this.jsPlumbInstance.getPosition(jsPlumbElement);
+                    if( c.type == "data" ) {
+                        var link = this.view.m.getDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+                    }
+                    else if( c.type == "event" ) {
+                        var link = this.view.m.getEventLink(c.source.id, c.target.id, c.event);
+                    }
+                    link.updatePathStep(startPosition, stopPosition);
+                }
+            });
+
+            // determine the style of the 2 connections
+            c.splitted = true; // indicates that this connection is splitted
+            if( c.type == "data" ) {
+                var connectionStyle = {
+                    paintStyle: this.style.splittedConnectorData.paintStyle,
+                    connector: this.style.splittedConnectorData.connector,
+                    connectorOverlays:this.style.splittedConnectorData.overlays,
+                    connectorStyle: this.style.splittedConnectorData.paintStyle,
+                    hoverPaintStyle: this.style.endpointData.hoverStyle,
+                    cssClass : 'data-connection'
+                }
+                var epStyle = this.style.dataLineSplitterEndpoint;
+            }
+            else if( c.type == "event" ) {
+                var connectionStyle = {
+                    paintStyle: this.style.eventConnectorData.paintStyle,
+                    connector: this.style.eventConnectorData.connector,
+                    connectorOverlays:this.style.eventConnectorData.overlays,
+                    connectorStyle: this.style.eventConnectorData.paintStyle,
+                    hoverPaintStyle: this.style.eventEndpointData.hoverStyle,
+                    cssClass : 'event-connection',
+                };
+                var epStyle = this.style.eventLineSplitterEndpoint;
+            }
+
+            // create the div endpoint
+            var ep = this.jsPlumbInstance.addEndpoint(id,  {
+                isSource : false,
+                isTarget : false,
+                uuid     : id,
+                anchor   : "Center",
+                maxConnections : 2,
+                parameters : c
+            }, epStyle);
+
+            // make the ep transparent to pointer events, left click on it must drag the div
+            $(ep.canvas).css('pointer-events', 'none');
+            $(ep.canvas).css('cursor', 'move');
+            $(ep.canvas).addClass('capture-left-click');
+            $(ep.canvas).addClass('capture-right-click');
+            $(ep.canvas).find('svg').attr('pointer-events', 'none');
+            $(ep.canvas).addClass(id);
+
+
+            // save the connection overlays
+            var overlays = connection.getOverlays();
+            var overlaysParams = [];
+            _.each(overlays, (o)=> {
+                overlaysParams.push([o.type, {
+                    "location"  : o.loc,
+                    "width"     : o.width,
+                    "length"    : o.length,
+                    "label"     : o.getLabel ? o.getLabel() : undefined,
+                    "id"        : o.id,
+                    "labelStyle": o.labelStyle
+                }]);
+            });
+
+            let [sourceEP, targetEP] = connection.getAttachedElements();
+            let targetId = connection.targetId;
+
+            // detach the original connection
+            this.jsPlumbInstance.detach(connection, { fireEvent: false, forceDetach: false });
+
+            // now reattach it into 2 connections
+            var c1 = this.jsPlumbInstance.connect({
+                source: sourceEP,
+                target: ep,
+                editable: true,
+            }, connectionStyle);
+
+            var c2 = this.jsPlumbInstance.connect({
+                source: ep,
+                target: targetEP._jsPlumb ? targetEP : targetId /* EP has been destroyed, reattach to window */,
+                editable: true,
+            }, connectionStyle);
+
+            sourceEP.setParameter("targetConnection", c1);
+            ep.setParameter("sourceConnection", c1);
+            ep.setParameter("targetConnection", c2);
+            targetEP.setParameter("sourceConnection", c2);
+
+            // add the overlays to c2
+            _.each(overlaysParams, (p)=> {
+                c2.addOverlay(p);
+            });
+
+            // add menu to remove this split
+            $(ep.canvas).ready(() => {
+                var menu = new ContextMenu("#" + id, [
+                    {
+                        name: 'Remove the split',
+                        fn: () => {
+                            this.unsplitConnection(ep);
+                        }
+                    },
+                ]);
+            });
+
+            return {
+                pos: pos,
+                c1 : c1,
+                c2 : c2
+            }
+        }
+
+        // Remove a split in a connection
+        // ep: entrypoint
+        // c1: connection 1
+        // c2: connection 2
+        this.unsplitConnection = (ep) => {
+            var c = ep.getParameters();
+            var c1 = c.sourceConnection;
+            var c2 = c.targetConnection;
+            var sourceEP = c1.getAttachedElements()[0];
+            var targetEP = c2.getAttachedElements()[1];
+
+            // detach and delete the endpoint
+            this.jsPlumbInstance.detach(c1, { fireEvent: false, forceDetach: false });
+            this.jsPlumbInstance.detach(c2, { fireEvent: false, forceDetach: false });
+            this.jsPlumbInstance.deleteEndpoint(ep);
+
+
+            // reconnect directly the source and the target
+            var connection = this.jsPlumbInstance.connect({
+                source: sourceEP,
+                target: targetEP,
+                editable: true,
+            });
+
+            sourceEP.setParameter('targetConnection', connection);
+            targetEP.setParameter('sourceConnection', connection);
+
+            // find the position of the split endpoint to remove
+            var id = c1.targetId;
+            var element = this.jsPlumbInstance.getElement(id)
+            var position = this.jsPlumbInstance.getPosition(element);
+
+            // remove the element in the path
+            // 1. find the link
+            // 2. find the position of the split endpoint
+            if( c.type == "data" ) {
+                var link = this.view.m.getDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+                link.removePathStep(position);
+            }
+            else if( c.type == "event" ) {
+                var link = this.m.getEventLink();
+                link.removePathStep(position);
+            }
+            else {
+                throw "unknown connection type";
+            }
+
+            // remove the div
+            $("#" + id).remove(); // delete the div
+        }
+
+
+        // bind jsplumb events
+        this.initializeListeners = () => {
+            this.selector.initialize();
+            this.zoomer.initialize();
+            ContextMenu.initialize(); // important to make this after the translater (right-clic conflicts)
+            this.translater.initialize();
+
+            // show selected nodes
+            this.selector.onSelecting((divs) => {
+                $(this.view.canvas).find('.card').removeClass('selected');
+                _.each(divs, (div) => {
+                    $(div).addClass('selected');
+                });
+            });
+
+            // Add every node in the selected area to JsPlumb selection
+            this.selector.onSelect((divs) => {
+                _.each(divs, (div) => {
+                    $(div).addClass('selected');
+                    this.jsPlumbInstance.addToDragSelection($(div)[0]);
+                });
+            });
+
+            // remove the selection
+            this.selector.onDeselect((divs) => {
+                _.each(divs, (div) => {
+                    $(div).removeClass('selected');
+                    this.jsPlumbInstance.removeFromDragSelection($(div)[0]);
+                });
+            });
+
+            this.jsPlumbInstance.bind("connectionDrag", (connection) => {
+                // hide the type of the source (output endpoint)
+                var endpoints = connection.getAttachedElements();
+                if( endpoints && endpoints[0] ) this.style.hideType(endpoints[0]);
+
+                // if the connection linked a source to a target, remove the connection
+                var c = connection.getParameters();
+                if( c.target ) {
+                    if( c.type === "data" ) {
+                        // remove the link
+                        this.view.m.removeDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+                    }
+                    else if( c.type === "event" ) {
+                        this.view.m.removeEventLink(c.source.id, c.target.id, c.event);
+                        this.view.setBoxMenu(c.source.id);
+                    }
+                }
+            });
+
+            this.jsPlumbInstance.bind("connectionDragStop", (connection) => {
+                // if the connection has not been made, show back the type of the source
+                var endpoints = connection.getAttachedElements();
+                if( endpoints && endpoints.length == 2 ) {
+                    var sourceEP = endpoints[0];
+                    var targetEP = endpoints[1];
+                    if( targetEP && targetEP.elementId.startsWith('jsPlumb')) {
+                        if( targetEP.elementId.startsWith('jsPlumb') ) {
+                            // no connection has been made, show back our output type
+                            var sourceOutput = connection.getParameters().source.output;
+                            if( !this.view.m.getNode(sourceEP.elementId).isOutputConnected(sourceOutput) ) {
+                                this.style.showType(sourceEP);
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.jsPlumbInstance.bind("connection", (info, event) => {
+                // only do this for connection established by user, no programmatically
+                if( event ) {
+                    var c = info.connection.getParameters();
+                    if( c.type === "data" ) {
+                        // check the types
+                        var sourceType = this.view.m.getNode(c.source.id).getOutputType(c.source.output);
+                        var targetType = this.view.m.getNode(c.target.id).getInputType(c.target.input);
+                        if( this.view.m.compareTypes(sourceType, targetType) ) {
+                            this.view.m.addDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+
+                            // hide source and target types
+                            this.style.hideType(info.sourceEndpoint);
+                            this.style.hideType(info.targetEndpoint);
+                        }
+                        else {
+                            // Error
+                            this.jsPlumbInstance.detach(info.connection, {
+                                fireEvent: false, //fire a connection detached event?
+                                forceDetach: false //override any beforeDetach listeners
+                            });
+                            this.style.showType(info.targetEndpoint);
+                            if( !this.view.m.getNode(info.sourceId).isOutputConnected(c.source.output) ) {
+                                this.style.showType(info.sourceEndpoint);
+                            }
+
+                            swal({
+                                title: "Nope.",
+                                html: "<div style='text-align: left;'>Output <b style='font-weight: bold;'>" + c.source.output + "</b> of <b style='font-weight: bold;'>" + info.sourceId + "</b> is of type <u>" + Utils.htmlentities(sourceType) + "</u><br/>Input <b style='font-weight: bold;'>" + c.target.input + "</b> of <b style='font-weight: bold;'>" + info.targetId  + "</b> is of type <u>" + Utils.htmlentities(targetType) + "</u>.</div><br/>Type mismatch.",
+                                type: "error",
+                            });
+                        }
+                    }
+                    else if( c.type === "event" ) {
+                        var target = this.view.m.getNode(c.target.id);
+                        var eventNames = target.getEventsNames();
+                        var options = {};
+                        _.each(eventNames, (name) => options[name] = name );
+
+                        swal({
+                            input: 'select',
+                            title: 'Select an event',
+                            inputOptions: options
+                        }).then( (result) => {
+                            if( result.value ) {
+                                info.connection.setParameter('event', result.value);
+                                info.connection.setLabel({ label: result.value, cssClass: "connection-label noselect", location: 0.5 });
+                                this.view.m.addEventLink(c.source.id, c.target.id, result.value);
+
+                                this.view.setBoxMenu(c.source.id);
+                            }
+                        });
+                    }
+                }
+            });
+
+            this.jsPlumbInstance.bind("connectionDetached", (info, event) => {
+                var c = info.connection.getParameters();
+                if( c.type === "data" ) {
+                    // remove the link
+                    this.view.m.removeDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+
+                    // show source and target type
+                    this.style.showType(info.targetEndpoint);
+                    if( !info.source.id.startsWith('connection-split') &&
+                        !this.view.m.getNode(info.source.id).isOutputConnected(c.source.output) ) {
+                        this.style.showType(info.sourceEndpoint);
+                    }
+                }
+                else if( c.type === "event" ) {
+                    this.view.m.removeEventLink(c.source.id, c.target.id, c.event);
+                    //this.style.showEventName(info.targetEndpoint);
+                }
+
+                // if the connection is splitted, remove all other connections/endpoint
+                if( c.splitted ) {
+                    var connections = this.jsPlumbInstance.getAllConnections();
+                    var connToDelete = [];
+                    var EPToDelete = {};
+                    _.each(connections, conn => {
+                        var p = conn.getParameters();
+                        if( p.source.id === c.source.id &&
+                            p.target.id === c.target.id &&
+                            ((c.type == "event"  && p.event === c.event) ||
+                            (c.type == "data" && p.source.sourceOutput == c.source.sourceOutput &&
+                            p.target.targetInput === p.target.targetInput))) {
+                            // collect the connection and the endpoints to delete
+                            connToDelete.push(conn);
+
+                            let [sourceEP, targetEP] = conn.getAttachedElements();
+                            if( sourceEP.getUuid().startsWith('connection-split-') ) {
+                                EPToDelete[ sourceEP.getUuid() ] = sourceEP;
+                            }
+                            if( targetEP.getUuid().startsWith('connection-split-') ) {
+                                EPToDelete[ targetEP.getUuid() ] = targetEP;
+                            }
+                        }
+                    });
+
+                    // clean all theses connections and endpoints once this call is ended
+                    _.each(connToDelete, conn => {
+                        _.defer(()=> {
+                            this.jsPlumbInstance.detach(conn, {
+                                fireEvent: false, //fire a connection detached event?
+                                forceDetach: false //override any beforeDetach listeners
+                            });
+                        });
+                    });
+
+                    _.each(EPToDelete, (endpoint, uuid) => {
+                        _.defer(()=> {
+                            var div = endpoint.getElement();
+                            this.jsPlumbInstance.deleteEndpoint(endpoint);
+                            $(div).remove();
+                        });
+                    });
+                }
+            });
+
+            this.jsPlumbInstance.bind("dblclick", async (connection, e) => {
+                let [sourceEP, targetEP] = connection.getAttachedElements();
+                let c = connection.getParameters();
+
+                // split this connection into 2 by creating an endpoint at the event coordinate
+                // remove 7px to align it to the center
+                var pos = {
+                    "top" : e.pageY - $(this.canvas).offset().top -7,
+                    "left": e.pageX - $(this.canvas).offset().left - 7
+                };
+                this.splitConnection(connection, pos); // return the endpoint exact position
+
+                // save to the graph
+                if( c.type == "data" ) {
+                    var link = this.m.getDataLink(c.source.id, c.source.output, c.target.id, c.target.input);
+                }
+                else {
+                    var link = this.m.getEventLink(c.source.id, c.target.id, c.event);
+                }
+
+                if( sourceEP.getUuid().startsWith('connection-split-') ) {
+                    var el = sourceEP.getElement();
+                    var prevPos = this.jsPlumbInstance.getPosition(el);
+                    link.addPathStep(prevPos, pos);
+                }
+                else {
+                    link.addPathStep( "source", pos );
+                }
+            });
+
+            return new Promise(resolve => jsPlumb.ready(resolve));
+        }
+    },
+    mounted: async function() {
+        this.jsPlumbInstance = jsPlumb.getInstance({
+            DragOptions: { cursor: 'pointer', zIndex: 2500 }, // default drag options
+            Container: "dualbox-graph-canvas"
+        });
+        this.jsPlumbInstance.rand = Math.random();
+        this.style.setDefault();
+        this.graphContainer = $(this.$el);
+        this.canvas = $(this.$el).find('.dualbox-graph-canvas');
+
+        // TODO: remove theses definitions from the graphview object (bugs when entering metanode)
+        this.view.selector = this.selector = new Selector(this, this.graphContainer);
+        this.view.translater = this.translater = new Translater(this, this.graphContainer, this.canvas);
+        this.view.zoomer = this.zoomer = new Zoomer(this, this.graphContainer, this.canvas);
+        this.view.canvasSizeHandler = this.canvasSizeHandler = new CanvasSizeHandler(this, this.canvas);
+
+        // autofocus editor when the div is clicked (allow to use keydown)
+        $(document).keydown(function(e) {
+            // Ensure event is not null
+            e = e || window.event;
+
+            if ((e.which == 90 || e.keyCode == 90) && e.ctrlKey) { // ctrl + z
+                if( $(self.$el).find('.dualbox-graph-container').is(':hover') ) {
+                    self.view.c.undo();
+                }
+            }
+            else if((e.which == 89 || e.keyCode == 89) && e.ctrlKey) { // ctrl + y
+                if( $(self.$el).find('.dualbox-graph-container').is(':hover') ) {
+                    self.view.c.redo();
+                }
+            }
+            else if((e.which == 46 || e.keyCode == 46)) { // suppr: delete selection
+                // idk why this doesnt work when binded directly to .dualbox-graph-container
+                if( $(self.$el).find('.dualbox-graph-container').is(':hover') ) {
+                    self.view.c.deleteSelection();
+                }
+            }
+        });
+
+        return await this.initializeListeners();
+    },
+    beforeUpdate: function() {
+        if( this.jsPlumbInstance ) {
+            this.jsPlumbInstance.reset();
+        }
+        /*
+        window.jsPlumbInstance = this.jsPlumbInstance = jsPlumb.getInstance({
+            DragOptions: { cursor: 'pointer', zIndex: 2500 }, // default drag options
+            Container: "dualbox-graph-canvas"
+        });
+        this.jsPlumbInstance.rand = Math.random();
+        */
+        this.style.setDefault();
+        //this.canvas.empty();
+        ContextMenu.clean();
+
+        this.zoomer.deactivate();
+    },
+    updated: async function() {
+        // don't do anything for out-of-date updates (hash is not matching)
+        console.log('Updating graph !');
+
+        // We need to add links and events to the nodes
+
+        // Function to gather all links from a node into the "links" array
+        var links = []; // array of links
+        var gatherLinks = (targetId, sourceDef) => {
+            // for nodes and uis
+            _.each(sourceDef.links, (sources, targetInput) => {
+                _.each(sources, (sourceOutput, sourceId) => {
+                    if( sourceId === "graph" ) {
+                        return;
+                    }
+
+                    if( sourceId === "input" || sourceId === "output" ) {
+                        sourceId = this.view.m.prefixId(sourceOutput, sourceId);
+                        sourceOutput = "value";
+                    }
+
+                    links.push({
+                        sourceId: sourceId,
+                        sourceOutput: sourceOutput,
+                        targetId: targetId,
+                        targetInput: targetInput
+                    });
+                });
+            });
+
+            // for inputs and outputs
+            _.each(sourceDef.link, (sourceOutput, sourceId) => {
+                if( sourceId === "graph" ) return;
+                if( sourceId === "input" || sourceId === "output" ) {
+                    sourceId = this.view.m.prefixId(sourceOutput, sourceId);
+                    sourceOutput = "value";
+                }
+
+                links.push({
+                    sourceId: sourceId,
+                    sourceOutput: sourceOutput,
+                    targetId: targetId,
+                    targetInput: "value"
+                });
+            });
+        }
+
+        // Function to gather all events from a node into the "links" array
+        var events = [];
+        var gatherEvents = (sourceId, def) => {
+            _.each(def.events, (evt) => {
+                if( evt.node ) {
+                    events.push({
+                        sourceId: sourceId,
+                        targetId: evt.node,
+                        name: evt.event
+                    });
+                }
+            });
+        }
+
+        _.each(this.app.input, (def, id) => {
+            id = this.view.m.prefixId(id, "input");
+            gatherLinks(id, def); // add all data links in our array
+            gatherEvents(id, def); // add all event links in our array
+        });
+        _.each(this.app.output, (def, id) => {
+            id = this.view.m.prefixId(id, "output");
+            gatherLinks(id, def); // add all data links in our array
+            gatherEvents(id, def); // add all event links in our array
+        });
+        _.each(this.app.modules, (def, id) =>{
+            gatherLinks(id, def); // add all data links in our array
+            gatherEvents(id, def); // add all event links in our array
+        });
+        _.each(this.app.ui,  (def, id) =>{
+            gatherLinks(id, def); // add all data links in our array
+            gatherEvents(id, def); // add all event links in our array
+        });
+
+        // Now, we gathered all links and events. Add them into jsPlumb
+        // add the links
+        _.each(links, (link) => {
+            this.addLink(link.sourceId, link.sourceOutput, link.targetId, link.targetInput);
+        });
+
+        // add the events
+        if( this.showEvents ) {
+            _.each(events, (e) => {
+                this.addEvent(e.sourceId, e.targetId, e.name);
+            });
+        }
+
+        await this.canvasSizeHandler.resize();
+        await this.zoomer.activate();
+
+        // Initialize all listeners again
+        await this.initializeListeners();
+
+        return new Promise(resolve => jsPlumb.ready(resolve));
+    },
+    methods: {
+        getNodeId: function( id, nodeType ) {
+            switch( nodeType ) {
+            case "input": return this.view.m.prefixId(id, "input");
+            case "output": return this.view.m.prefixId(id, "output");
+            case "module":
+            case "ui":
+            default:
+                return id;
+            }
+        },
+
+        getNode( id, nodeType ) {
+            var realId = this.getNodeId(id, nodeType);
+            return this.view.m.getNode(realId);
+        },
+
+        getNodeUniqId(id, nodeType) {
+            return this.getNode(id, nodeType).getUniqId();
+        },
+
+        setLoading(b) {
+            this.loading = b;
+        },
+
+        gotoTopLeft: function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.translater.gotoTopLeft();
+        },
+
+        gotoTopRight: function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.translater.gotoTopRight();
+        },
+
+        gotoBottomLeft: function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.translater.gotoBottomLeft();
+        },
+
+        gotoBottomRight: function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.translater.gotoBottomRight();
+        },
+    }
+}
+</script>

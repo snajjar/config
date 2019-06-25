@@ -1,0 +1,71 @@
+var _ = require('lodash');
+
+const Permissions = {
+    'EveryOne' : {
+        'insert' : function(userId, doc) { return true; },
+        'remove' : function(userId, doc) { return true; },
+        'update' : function(userId, doc, fieldNames, modifier) { return true; },
+    },
+
+    'User' : {
+        'insert' : function(userId, doc) { return true; },
+        'remove' : function(userId, doc) { return doc.ownerId == userId; },
+        'update' : function(userId, doc, fieldNames, modifier) { return doc.ownerId == userId; },
+    },
+
+    'Admin' : {
+        'insert' : function(userId, doc) { return isAdmin(userId); },
+        'remove' : function(userId, doc) { return isAdmin(userId); },
+        'update' : function(userId, doc, fieldNames, modifier) { return isAdmin(userId); },
+    },
+};
+
+
+// EveryOne
+
+// User only
+Apps.allow(Permissions.User);
+AppVersions.allow(Permissions.User);
+Notifications.allow(Permissions.User);
+
+// Admin
+Apps.allow(Permissions.Admin);
+AppVersions.allow(Permissions.Admin);
+InstanciationsDay.allow(Permissions.Admin);
+InstanciationsWeek.allow(Permissions.Admin);
+InstanciationsMonth.allow(Permissions.Admin);
+Invoices.allow(Permissions.Admin);
+
+// User management: some fields can be updated by the user itself, other don't
+Meteor.users.allow({
+    'insert' : function(userId, doc) {
+        return isAdmin(userId);
+    },
+
+    'remove' : function(userId, doc) {
+        return isAdmin(userId);
+    },
+
+    'update' : function(userId, doc, fieldNames, modifier) {
+        var userAllowedFields = ['profile', 'VATPolicy', 'VATIntracomm', 'billingAddress', 'plan' ];
+
+        console.log("fields: " + fieldNames);
+
+        var requireAdminPermission = false;
+        _.each( fieldNames, (fieldName) => {
+            if( userAllowedFields.indexOf(fieldName) === -1 ) {
+                console.log(fieldName + ' requires admin permission for update');
+                requireAdminPermission = true;
+            }
+        });
+
+        console.log('Is user ' + userId + ' admin ? ' + isAdmin(userId));
+
+        if( isAdmin(userId) ) {
+            return true;
+        }
+        else {
+            return !requireAdminPermission && doc._id === userId;
+        }
+    },
+});
