@@ -13,7 +13,7 @@ xterm*faceName: xft:monospace:pixelsize=17
 
 
 Xcursor.theme: Vanilla-DMZ-AA
-Xcursor.size: 64
+Xcursor.size: 32
 
 
 ! Set up scrollbars - get them, get them on the right side, and be
