@@ -1,0 +1,8 @@
+keycode 67 = XF86AudioMute
+keycode 68 = 'sh -c "pactl set-sink-mute 0 false ; pactl set-sink-volume 0 -5%"'
+keycode 69 = 'sh -c "pactl set-sink-mute 0 false ; pactl set-sink-volume 0 +5%"'
+keycode 70 = XF86AudioMicMute
+keycode 71 = XF86MonBrightnessDown
+keycode 72 = XF86MonBrightnessUp
+keycode 73 = XF86Display
+keycode 74 = XF86WLAN

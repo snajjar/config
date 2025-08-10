@@ -1,0 +1,28 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "permissions": {
+    "allowed_tools": [
+      "edit"
+    ]
+  },
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen 3 4B",
+          "id": "qwen3:4b",
+          "context_window": 32768,
+          "default_max_tokens": 4096
+        },
+        {
+          "name": "Gpt-oss",
+          "id": "gpt-oss:20b",
+          "context_window": 128000
+        }
+      ]
+    }
+  ,"openrouter":{"api_key":"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"}}
+,"models":{"large":{"model":"gpt-oss:20b","provider":"ollama"}}}

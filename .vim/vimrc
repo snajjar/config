@@ -189,6 +189,33 @@ set cinwords="if,else,while,do,for,switch"
 " complete les #i par des include
 iab   #i #include
 
+" ---- Alt+Flèches = navigation par mot ----
+" Normal / Visuel / Operator-pending
+nnoremap <A-Right> w
+nnoremap <A-Left>  b
+xnoremap <A-Right> w
+xnoremap <A-Left>  b
+onoremap <A-Right> w
+onoremap <A-Left>  b
+
+" Insert : exécuter le mouvement puis revenir à l'insert
+inoremap <A-Right> <C-o>w
+inoremap <A-Left>  <C-o>b
+
+" Certains terminaux envoient <M-...> au lieu de <A-...>
+nnoremap <M-Right> w
+nnoremap <M-Left>  b
+xnoremap <M-Right> w
+xnoremap <M-Left>  b
+onoremap <M-Right> w
+onoremap <M-Left>  b
+inoremap <M-Right> <C-o>w
+inoremap <M-Left>  <C-o>b
+
+" ---- b = Visual Block (sans casser db/cb/... en operator-pending) ----
+nnoremap b <C-v>
+xnoremap b <C-v>
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " syntax files

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "permissions": {
+    "allowed_tools": [
+      "view",
+      "ls",
+      "edit",
+      "grep",
+      "bash",
+      "mcp_web_search",
+      "mcp_web_fetch"
+    ]
+  },
+  "mcp": {
+    "utils": {
+      "type": "stdio",
+      "command": "/home/seb/perso/mcp/run_mcp.sh",
+      "args": [],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+     }
+  },
+  "providers": {
+    "ollama-http": {
+      "name": "Ollama",
+      "base_url": "http://127.0.0.1:11434/v1/",
+      "stream": true,
+      "http": {
+        "keep_alive": true,
+        "max_idle_conns": 20,
+        "idle_conn_timeout": "120s"
+      },
+      "type": "openai",
+      "models": [
+        { "name": "Llama 3.2 Fast", "id": "llama3.2_1b_q4_fast", "context_window": 131072, "default_max_tokens": 256 },
+        { "name": "Llama 3.2 3B", "id": "llama3.2:3b", "context_window": 131072, "default_max_tokens": 4096 },
+        { "name": "Granite 3.3 8B", "id": "granite3.3:8b", "context_window": 131072, "default_max_tokens": 4096 },
+        { "name": "Qwen 3 4B", "id": "qwen3:4b", "context_window": 32768, "default_max_tokens": 4096 },
+        { "name": "GPT-OSS 20B", "id": "gpt-oss:20b", "context_window": 131072, "default_max_tokens": 4096 }
+      ]
+    }
+  }
+}

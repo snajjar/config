@@ -1,0 +1,3 @@
+timeout 900 'pidof hyperlock || hyprlock'
+before-sleep 'pidof hyperlock || hyprlock --immediate'
+timeout 10800 'systemctl suspend'
